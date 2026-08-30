@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { DescriptionInput } from "@/components/DescriptionInput";
 import { SpecViewer } from "@/components/SpecViewer";
 import { StreamingOutput } from "@/components/StreamingOutput";
@@ -7,12 +7,39 @@ import { AppSpec } from "@/types/appSpec";
 import { useToast } from "@/hooks/use-toast";
 import { Terminal, Smartphone } from "lucide-react";
 
+const SPEC_STORAGE_KEY = "nlp-programmer:last-spec";
+
+interface StoredResult {
+  spec: AppSpec | null;
+  rawJson: string;
+}
+
+function loadStoredResult(): StoredResult | null {
+  try {
+    const raw = localStorage.getItem(SPEC_STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as StoredResult;
+  } catch {
+    return null;
+  }
+}
+
 const Index = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [streamText, setStreamText] = useState("");
-  const [spec, setSpec] = useState<AppSpec | null>(null);
-  const [rawJson, setRawJson] = useState("");
+  const [spec, setSpec] = useState<AppSpec | null>(() => loadStoredResult()?.spec ?? null);
+  const [rawJson, setRawJson] = useState(() => loadStoredResult()?.rawJson ?? "");
   const { toast } = useToast();
+
+  // Persist the latest generated spec so it survives leaving/reopening the app
+  useEffect(() => {
+    if (!spec && !rawJson) return;
+    try {
+      localStorage.setItem(SPEC_STORAGE_KEY, JSON.stringify({ spec, rawJson }));
+    } catch {
+      // Storage full or unavailable — ignore
+    }
+  }, [spec, rawJson]);
 
   const handleGenerate = useCallback((description: string) => {
     setIsLoading(true);
