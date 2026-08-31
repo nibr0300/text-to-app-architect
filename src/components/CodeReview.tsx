@@ -3,7 +3,7 @@ import { AppSpec } from "@/types/appSpec";
 import { GeneratedFile } from "@/types/generatedProject";
 import { BuildContract } from "@/types/generatedProject";
 import { ReviewFinding, ReviewReport, ReviewRoadmapStep, ReviewSection, ReviewStage, RoadmapRepairResult } from "@/types/review";
-import { planReviewStages, repairRoadmapStep, reviewCodebase, RoadmapRepairError } from "@/lib/reviewCodebase";
+import { hasRepairExperience, planReviewStages, repairRoadmapStep, reviewCodebase, RoadmapRepairError } from "@/lib/reviewCodebase";
 import { ZipUpload } from "@/components/ZipUpload";
 import { FileTreeViewer } from "@/components/FileTreeViewer";
 import { Button } from "@/components/ui/button";
