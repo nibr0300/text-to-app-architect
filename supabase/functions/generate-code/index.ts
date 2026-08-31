@@ -112,13 +112,15 @@ interface HandlerResult {
 }
 
 async function handleStage(body: Record<string, unknown>): Promise<HandlerResult> {
-  const { stage, spec, screen, files, contract } = (body ?? {}) as {
+  const { stage, spec, screen, files, contract, issues } = (body ?? {}) as {
     stage?: string;
     spec?: Record<string, unknown> & { packageName?: string; screens?: { id: string; name: string }[] };
     screen?: unknown;
     files?: { path: string; content: string }[];
     contract?: unknown;
+    issues?: { path: string; rule: string; message: string; severity?: string }[];
   };
+
 
   if (!stage || !STAGE_PROMPTS[stage]) return { error: "Invalid stage" };
   if (!spec) return { error: "Spec is required" };
