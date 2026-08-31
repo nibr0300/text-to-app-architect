@@ -76,7 +76,18 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
   const [history, setHistory] = useState<ReviewReport[]>(() => loadJson<ReviewReport[]>(HISTORY_KEY) ?? []);
   const [fixingStep, setFixingStep] = useState<string | null>(null);
   const [lastRepair, setLastRepair] = useState<RoadmapRepairResult | null>(null);
+  const [directives, setDirectives] = useState<string[]>(() => loadJson<string[]>(DIRECTIVES_KEY) ?? []);
+  const [draft, setDraft] = useState("");
   const { toast } = useToast();
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(DIRECTIVES_KEY, JSON.stringify(directives));
+    } catch {
+      // ignore
+    }
+  }, [directives]);
+
 
   useEffect(() => {
     try {
