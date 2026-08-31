@@ -4,4 +4,5 @@
 - [x] Implementera holistisk batchreparation med full projektkontext
 - [x] Lägg till regressionsskydd före koduppdatering
 - [x] Visa progression mellan granskningar
-- [ ] Verifiera AI-anrop, tester och preview
+- [x] Verifiera AI-anrop och tester
+- [ ] Verifiera preview och aktuell buildstatus

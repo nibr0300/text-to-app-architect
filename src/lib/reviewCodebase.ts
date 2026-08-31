@@ -276,11 +276,9 @@ export async function repairRoadmapStep(
   const merged = mergeFiles(files, changed);
   const lintAfter = lintProject(merged);
   const beforeKeys = new Set(lintBefore.map(lintKey));
-  const introducedErrors = lintAfter.filter((issue) => issue.severity === "error" && !beforeKeys.has(lintKey(issue)));
-  const warningsBefore = lintBefore.filter((issue) => issue.severity === "warning").length;
-  const warningsAfter = lintAfter.filter((issue) => issue.severity === "warning").length;
-  if (introducedErrors.length || lintAfter.length > lintBefore.length || warningsAfter > warningsBefore) {
-    const reason = introducedErrors[0]?.message ?? "den statiska felbilden förvärrades";
+  const introducedIssues = lintAfter.filter((issue) => !beforeKeys.has(lintKey(issue)));
+  if (introducedIssues.length || lintAfter.length > lintBefore.length) {
+    const reason = introducedIssues[0]?.message ?? "den statiska felbilden förvärrades";
     throw new Error(`Batchen avvisades av regressionsskyddet: ${reason}. Ingen kod uppdaterades.`);
   }
 
