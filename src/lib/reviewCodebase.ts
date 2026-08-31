@@ -145,14 +145,22 @@ export interface ReviewCallbacks {
   onStageError: (id: string, error: string) => void;
 }
 
+export interface ReviewOptions {
+  directives?: string[];
+  excluded?: { title: string; reason: string }[];
+}
+
 export async function reviewCodebase(
   files: GeneratedFile[],
   spec: AppSpec | null,
   source: "generated" | "upload",
   cb: ReviewCallbacks,
   previous: ReviewReport | null = null,
+  options: ReviewOptions = {},
 ): Promise<ReviewReport> {
   const sections: ReviewSection[] = [];
+  const directives = (options.directives ?? []).filter((item) => item.trim().length > 0);
+  const excluded = options.excluded ?? [];
 
   cb.onStageStart("lint");
   const issues = lintProject(files);
@@ -164,7 +172,7 @@ export async function reviewCodebase(
     const id = `area:${area.id}`;
     cb.onStageStart(id);
     try {
-      const res = await call({ stage: "audit", area: area.id, spec, files });
+      const res = await call({ stage: "audit", area: area.id, spec, files, directives });
       const section = res.section as ReviewSection | undefined;
       if (section) {
         const stableSection = stabilizeSection(section);
@@ -189,7 +197,7 @@ export async function reviewCodebase(
     roadmap: [] as ReviewRoadmapStep[],
   };
   try {
-    const res = await call({ stage: "verdict", sections, lint: issues });
+    const res = await call({ stage: "verdict", sections, lint: issues, directives, excluded });
     verdict = { ...verdict, ...(res.verdict as typeof verdict) };
     cb.onStageDone("verdict");
   } catch (e) {
@@ -204,6 +212,7 @@ export async function reviewCodebase(
     generatedAt: new Date().toISOString(),
     source,
     fileCount: files.length,
+    directives,
   };
   report.delta = compareReports(report, previous);
   return report;
