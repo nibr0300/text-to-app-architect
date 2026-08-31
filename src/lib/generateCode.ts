@@ -32,12 +32,20 @@ async function callStage(payload: {
     throw new Error(data.error || `Error ${resp.status}`);
   }
 
-  const data = await resp.json();
+  const text = await resp.text();
+  let data: { files?: GeneratedFile[]; contract?: BuildContract; report?: QualityReport; error?: string };
+  try {
+    data = JSON.parse(text.trim());
+  } catch {
+    throw new Error("Ogiltigt svar från servern.");
+  }
+  if (data.error) throw new Error(data.error);
   return {
     files: (data.files ?? []) as GeneratedFile[],
     contract: (data.contract ?? null) as BuildContract | null,
     report: (data.report ?? null) as QualityReport | null,
   };
+
 }
 
 function merge(existing: GeneratedFile[], incoming: GeneratedFile[]): GeneratedFile[] {
