@@ -1,6 +1,7 @@
 import { AppSpec } from "@/types/appSpec";
 import { BuildContract, GeneratedFile } from "@/types/generatedProject";
 import {
+  ProcessAudit,
   ReviewDelta,
   ReviewFinding,
   ReviewReport,
@@ -12,6 +13,7 @@ import {
   RoadmapRepairResult,
 } from "@/types/review";
 import { LintIssue, lintProject } from "@/lib/lintProject";
+
 
 const REVIEW_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/review-codebase`;
 
