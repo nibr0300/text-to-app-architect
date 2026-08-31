@@ -101,6 +101,20 @@ For EVERY listed issue, return the complete corrected file:
 - paidApi / staticOAuthToken: add a real fallback path or the actual OAuth token-refresh flow.
 
 Return ONLY: {"files":[{"path":"...","content":"full corrected file"}],"report":{"checks":[{"id":"rule id","label":"short label in the contract's uiLanguage","status":"ok|fixed|warning","detail":"one sentence"}],"manualFollowUps":["..."]}}`,
+  projectRepair: `You are executing ONE stage of a project-wide completion roadmap. This is an atomic, holistic repair — never treat findings as isolated patches.
+
+You receive the COMPLETE project, the complete audit report, and the selected roadmap stage. Before editing, reason across the full dependency graph: Gradle dependencies, manifest declarations, resources, models, service/repository contracts, callers, navigation and language. Preserve working behavior and existing public APIs unless the roadmap explicitly requires coordinated migration of every caller.
+
+Rules:
+1. Address only the selected stage, but fix every directly coupled file needed to make that stage internally consistent.
+2. Respect earlier roadmap stages and do not implement a later stage prematurely.
+3. Never introduce a class, resource, id, dependency, permission, method or constructor without updating every required declaration and caller in the same batch.
+4. Never replace real implementation with placeholders, TODOs, simulated data or deleted functionality.
+5. Re-read the resulting project as a whole before returning it. Ensure imports, package names, signatures, resources, manifest and Gradle remain mutually consistent.
+6. If the stage cannot be completed without credentials, commercial APIs, missing product decisions or binary assets, make all safe code changes and list the exact blocker under manualFollowUps instead of inventing a stand-in.
+
+Return ONLY this JSON shape:
+{"files":[{"path":"relative project path","content":"complete corrected file"}],"repair":{"addressedFindingIds":["finding id"],"changedPaths":["path"],"manualFollowUps":["blocker or manual action"]}}`,
 
 };
 
@@ -108,17 +122,20 @@ interface HandlerResult {
   files?: { path: string; content: string }[];
   contract?: unknown;
   report?: unknown;
+  repair?: unknown;
   error?: string;
 }
 
 async function handleStage(body: Record<string, unknown>): Promise<HandlerResult> {
-  const { stage, spec, screen, files, contract, issues } = (body ?? {}) as {
+  const { stage, spec, screen, files, contract, issues, reviewReport, roadmapStep } = (body ?? {}) as {
     stage?: string;
     spec?: Record<string, unknown> & { packageName?: string; screens?: { id: string; name: string }[] };
     screen?: unknown;
     files?: { path: string; content: string }[];
     contract?: unknown;
     issues?: { path: string; rule: string; message: string; severity?: string }[];
+    reviewReport?: unknown;
+    roadmapStep?: unknown;
   };
 
 
@@ -146,8 +163,11 @@ async function handleStage(body: Record<string, unknown>): Promise<HandlerResult
       .map((s) => `${s.id} (${s.name})`)
       .join(", ")}`;
   }
-  if (stage === "review" || stage === "integrate" || stage === "repair") {
+  if (stage === "review" || stage === "integrate" || stage === "repair" || stage === "projectRepair") {
     const tree = files ?? [];
+    if (tree.length > 800 || tree.some((file) => file.path.length > 500 || file.content.length > 500_000)) {
+      return { error: "Kodbasen är för stor för en säker reparationsbatch." };
+    }
     userContent += `\n\nPROJECT FILES:\n${tree.map((f) => `--- ${f.path} ---\n${f.content}`).join("\n\n")}`;
   }
   if (stage === "repair") {
@@ -155,10 +175,17 @@ async function handleStage(body: Record<string, unknown>): Promise<HandlerResult
       .map((i) => `- [${i.severity ?? "error"}] ${i.path} (${i.rule}): ${i.message}`)
       .join("\n")}`;
   }
+  if (stage === "projectRepair") {
+    if (!roadmapStep || !reviewReport || !(files?.length)) return { error: "Roadmap, granskningsrapport och projektfiler krävs." };
+    userContent += `\n\nCOMPLETE AUDIT REPORT:\n${JSON.stringify(reviewReport, null, 2)}`;
+    userContent += `\n\nSELECTED ROADMAP STAGE (execute atomically):\n${JSON.stringify(roadmapStep, null, 2)}`;
+  }
 
   const model =
     stage === "contract" || stage === "integrate" || stage === "repair"
       ? "openai/gpt-5.5"
+      : stage === "projectRepair"
+        ? "google/gemini-3.1-pro-preview"
       : "google/gemini-3.7-flash";
 
 
@@ -208,7 +235,7 @@ async function handleStage(body: Record<string, unknown>): Promise<HandlerResult
     (f) => f && typeof f.path === "string" && typeof f.content === "string",
   );
 
-  return { files: outFiles, contract: parsed.contract ?? null, report: parsed.report ?? null };
+  return { files: outFiles, contract: parsed.contract ?? null, report: parsed.report ?? null, repair: parsed.repair ?? null };
 }
 
 serve(async (req) => {

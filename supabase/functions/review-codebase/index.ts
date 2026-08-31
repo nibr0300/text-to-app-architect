@@ -58,12 +58,14 @@ const AREA_PROMPTS: Record<string, { title: string; instructions: string }> = {
 
 const AUDIT_SHAPE = `{"summary":"one or two sentences","findings":[{"id":"kebab-case-id","severity":"critical|major|minor|info","title":"short title","detail":"what is wrong and why it matters","paths":["app/src/..."],"suggestion":"concrete fix"}]}`;
 
-const VERDICT_PROMPT = `You receive the findings from every audit area (plus deterministic static-analysis results). Produce the overall verdict.
+const VERDICT_PROMPT = `You receive the findings from every audit area (plus deterministic static-analysis results). Produce the overall verdict and ONE coherent completion roadmap.
+
+The roadmap is not a restatement of findings. Group findings that share a root cause or require coordinated cross-file changes into atomic stages. Order stages by dependency: build foundation first, then contracts/data/API, implementation, navigation/resources, and final quality. A later stage may depend on earlier stage ids. Every stage must have testable acceptance criteria. Never create competing fixes for the same root cause.
 
 Return ONLY:
-{"completeness": 0-100 integer estimate of how much of a genuinely working app exists, "verdict":"2-4 sentences, direct and honest", "strengths":["what is genuinely well done"], "nextSteps":["prioritised actions, most important first"]}
+{"completeness": 0-100 integer estimate of how much of a genuinely working app exists, "verdict":"2-4 sentences, direct and honest", "strengths":["what is genuinely well done"], "nextSteps":["prioritised actions, most important first"], "roadmap":[{"id":"stable-kebab-id","order":1,"title":"short stage title","objective":"the project-level outcome","rationale":"why these findings must be solved together","findingIds":["existing finding id"],"paths":["all files likely requiring coordinated edits"],"dependsOn":[],"acceptanceCriteria":["specific verifiable condition"]}]}
 
-Weigh critical findings heavily: a project that cannot compile or whose core feature is placebo cannot score above 60.`;
+Every critical or major finding must belong to exactly one roadmap stage. Use only finding ids and file paths present in the supplied audit. Weigh critical findings heavily: a project that cannot compile or whose core feature is placebo cannot score above 60.`;
 
 interface Finding {
   id?: string;
@@ -124,6 +126,44 @@ interface HandlerResult {
   error?: string;
 }
 
+interface RoadmapStepInput {
+  id?: unknown;
+  order?: unknown;
+  title?: unknown;
+  objective?: unknown;
+  rationale?: unknown;
+  findingIds?: unknown;
+  paths?: unknown;
+  dependsOn?: unknown;
+  acceptanceCriteria?: unknown;
+}
+
+function stringList(value: unknown, limit = 50): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.length > 0).slice(0, limit)
+    : [];
+}
+
+function sanitizeRoadmap(value: unknown, validFindingIds: Set<string>) {
+  if (!Array.isArray(value)) return [];
+  const raw = value.slice(0, 12) as RoadmapStepInput[];
+  const ids = raw.map((step, index) =>
+    typeof step.id === "string" && /^[a-z0-9-]{2,80}$/.test(step.id) ? step.id : `stage-${index + 1}`,
+  );
+  return raw.map((step, index) => ({
+    id: ids[index],
+    order: index + 1,
+    title: typeof step.title === "string" ? step.title.slice(0, 160) : `Etapp ${index + 1}`,
+    objective: typeof step.objective === "string" ? step.objective.slice(0, 1000) : "",
+    rationale: typeof step.rationale === "string" ? step.rationale.slice(0, 1000) : "",
+    findingIds: stringList(step.findingIds).filter((id) => validFindingIds.has(id)),
+    paths: stringList(step.paths, 100),
+    dependsOn: stringList(step.dependsOn).filter((id) => ids.slice(0, index).includes(id)),
+    acceptanceCriteria: stringList(step.acceptanceCriteria, 20),
+    status: "pending",
+  }));
+}
+
 async function handle(body: Record<string, unknown>): Promise<HandlerResult> {
   const { stage, area, spec, files, sections, lint } = (body ?? {}) as {
     stage?: string;
@@ -173,12 +213,19 @@ async function handle(body: Record<string, unknown>): Promise<HandlerResult> {
     const user = `AUDIT SECTIONS:\n${JSON.stringify(sections ?? [], null, 2)}\n\nSTATIC ANALYSIS:\n${JSON.stringify(lint ?? [], null, 2)}`;
     const parsed = await callModel("openai/gpt-5.5", `${BASE}\n\n${VERDICT_PROMPT}`, user);
     const pct = Number(parsed.completeness);
+    const sectionList = Array.isArray(sections) ? sections as { findings?: { id?: unknown }[] }[] : [];
+    const validFindingIds = new Set(
+      sectionList.flatMap((section) => section.findings ?? [])
+        .map((finding) => finding.id)
+        .filter((id): id is string => typeof id === "string"),
+    );
     return {
       verdict: {
         completeness: Number.isFinite(pct) ? Math.max(0, Math.min(100, Math.round(pct))) : 0,
         verdict: parsed.verdict ?? "",
         strengths: Array.isArray(parsed.strengths) ? parsed.strengths : [],
         nextSteps: Array.isArray(parsed.nextSteps) ? parsed.nextSteps : [],
+        roadmap: sanitizeRoadmap(parsed.roadmap, validFindingIds),
       },
     };
   }
