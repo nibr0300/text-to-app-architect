@@ -26,11 +26,18 @@ HARD QUALITY RULES (a violation makes the output unacceptable):
 4. SINGLE SOURCE OF TRUTH FOR SETTINGS. All reads/writes of user settings go through the generated PreferencesStore. No Activity may touch SharedPreferences directly.
 5. LANGUAGE CONSISTENCY. Derive one UI language from the spec (its description/screen names). TTS Locale, all user-visible strings, strings.xml and spoken announcements must all use that same language. Never mix a Swedish TTS locale with English strings.
 6. RELEASE SAFETY. HttpLoggingInterceptor may only be added when BuildConfig.DEBUG is true, at Level.BODY in debug and NONE otherwise. Release build type: isMinifyEnabled = true with working proguard-rules.pro. Never hardcode API keys — read them from local.properties via buildConfigField and reference BuildConfig.
-7. FULL NAVIGATION. Every generated Activity must be reachable from at least one other screen through a real Intent (settings screens get a visible button or toolbar menu item). No orphan Activities.
+7. FULL NAVIGATION. Every generated Activity must be reachable from at least one other screen through a real Intent. If navigation goes through a Toolbar menu, you MUST also generate res/menu/<name>.xml AND inflate it (onCreateOptionsMenu or toolbar.inflateMenu / app:menu in the layout) — a setOnMenuItemClickListener without an inflated menu is a bug.
 8. NO DEAD CODE. Every generated data class, service, repository and helper must be referenced somewhere in the app.
+9. DEFENSIVE PLATFORM CALLS. Google Play Services APIs (FusedLocationProviderClient, ML Kit via GMS) must be guarded with GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context) and degrade gracefully with a user-visible message instead of crashing. BLE scanning must use ScanFilter with the relevant service UUID (e.g. 0x180D for heart rate) — never connect to the first device found. Every network call needs an error path shown in the UI.
+10. NO SYNTHETIC STAND-INS FOR REAL MEDIA. Never generate audio by writing WAV headers/sine tones, never fabricate images or data. Audio playback must come from a real source: the device's own media session (MediaController/AudioManager), a user-picked file (ActivityResultContracts.OpenDocument / MediaStore), or a bundled res/raw resource the README tells the developer to supply.
+11. AUTH FLOWS MUST BE REAL. Third-party APIs that need OAuth (Spotify etc.) require the actual authorization + token-refresh flow, not a hardcoded Bearer token. If a provider appears in the UI (a spinner option, a button) it must be implemented — otherwise do not offer it.
+12. AVOID PAID/RESTRICTED APIs unless the spec demands them. If one is unavoidable (Google Roads Speed Limits), implement a documented fallback path and list the required billing activation in manualFollowUps and the README.
+13. LANGUAGE FIDELITY. The UI language is the language the user wrote the spec in. Never silently switch the whole app to English. TTS locale, SpeechRecognizer language, strings.xml and all announcements use that one language.
+14. COMPILABLE OUTPUT. Balanced braces/parens, no stray tokens, no truncated files, no TODO/FIXME. Re-read each file before returning it.
 
 OUTPUT FORMAT (strict): return ONLY a JSON object, no markdown fences:
 {"files":[{"path":"relative/path/from/project/root","content":"full file content"}]}`;
+
 
 const STAGE_PROMPTS: Record<string, string> = {
   contract: `Do NOT generate any files in this stage. Produce the BUILD CONTRACT that every later stage must obey.
