@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compareReports, findingFingerprint } from "@/lib/reviewCodebase";
+import { compareReports, findingFingerprint, projectFingerprint } from "@/lib/reviewCodebase";
 import { ReviewFinding, ReviewReport } from "@/types/review";
 
 const finding = (title: string, severity: ReviewFinding["severity"]): ReviewFinding => ({
@@ -38,5 +38,11 @@ describe("review progression", () => {
     expect(delta?.introduced).toHaveLength(1);
     expect(delta?.critical).toBe(-1);
     expect(delta?.major).toBe(1);
+  });
+
+  it("changes the project fingerprint only when project contents change", () => {
+    const files = [{ path: "app/A.kt", content: "class A" }, { path: "app/B.kt", content: "class B" }];
+    expect(projectFingerprint(files)).toBe(projectFingerprint([...files].reverse()));
+    expect(projectFingerprint(files)).not.toBe(projectFingerprint([{ ...files[0], content: "class Changed" }, files[1]]));
   });
 });
