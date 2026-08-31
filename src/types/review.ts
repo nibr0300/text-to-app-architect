@@ -20,7 +20,7 @@ export interface ReviewRoadmapStep {
   paths: string[];
   dependsOn: string[];
   acceptanceCriteria: string[];
-  status?: "pending" | "applied" | "verified" | "blocked";
+  status?: "pending" | "applied" | "verified" | "blocked" | "dismissed";
   attempts?: RoadmapRepairAttempt[];
 }
 
