@@ -129,7 +129,7 @@ interface HandlerResult {
 }
 
 async function handleStage(body: Record<string, unknown>): Promise<HandlerResult> {
-  const { stage, spec, screen, files, contract, issues, reviewReport, roadmapStep, previousAttempts } = (body ?? {}) as {
+  const { stage, spec, screen, files, contract, issues, reviewReport, roadmapStep, previousAttempts, directives } = (body ?? {}) as {
     stage?: string;
     spec?: Record<string, unknown> & { packageName?: string; screens?: { id: string; name: string }[] };
     screen?: unknown;
@@ -139,6 +139,7 @@ async function handleStage(body: Record<string, unknown>): Promise<HandlerResult
     reviewReport?: unknown;
     roadmapStep?: unknown;
     previousAttempts?: unknown[];
+    directives?: unknown;
   };
 
 
