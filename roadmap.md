@@ -9,4 +9,4 @@
 - [x] Spara reparationsförsök och negativ feedback per roadmap-etapp
 - [x] Förbjud identiska omförsök utan ändrade förutsättningar
 - [x] Stöd blockerade etapper och alternativ strategi i UI
-- [ ] Verifiera loopskydd, tillfälliga fel och regressionsavvisning
+- [x] Verifiera loopskydd, tillfälliga fel och regressionsavvisning
