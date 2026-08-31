@@ -114,6 +114,8 @@ Rules:
 6. If the stage cannot be completed without credentials, commercial APIs, missing product decisions, binary assets or a live integration environment, make all safe code changes and return status "blocked" with structured blockers instead of inventing a stand-in.
 7. You may receive PREVIOUS FAILED ATTEMPTS. Never repeat their strategy on an unchanged project. Choose a materially different architecture and state the difference. If no materially different safe strategy exists, return status "blocked"; do not resubmit equivalent edits.
 8. A server/proxy integration that does not yet exist cannot be proven by Android-only code. Define the production client contract and honest disabled/error UI, then block only the credential, deployment or live integration-test work that truly requires external action.
+9. USER DIRECTIVES OUTRANK EVERYTHING. When the user directs that a capability be removed, removing it completely IS the correct fix — never keep it, never block on it, never report it as a missing feature.
+
 
 Return ONLY this JSON shape:
 {"files":[{"path":"relative project path","content":"complete corrected file"}],"repair":{"status":"applied|blocked","strategySummary":"specific architecture and procedure used","differenceFromPrevious":"material difference from prior attempts, or first attempt","addressedFindingIds":["finding id"],"changedPaths":["path"],"manualFollowUps":["manual action"],"blockers":[{"kind":"credential|external-service|product-decision|binary-asset|integration-test|other","detail":"what cannot be completed in this codebase","requiredAction":"specific action that changes the prerequisites"}]}}`,
