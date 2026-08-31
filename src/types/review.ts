@@ -111,12 +111,14 @@ export interface ReviewReport {
   nextSteps: string[];
   roadmap: ReviewRoadmapStep[];
   delta?: ReviewDelta;
+  processAudit?: ProcessAudit;
   sections: ReviewSection[];
   generatedAt: string;
   source: "generated" | "upload";
   fileCount: number;
   directives?: string[];
 }
+
 
 export type ReviewStageStatus = "pending" | "running" | "done" | "error";
 
