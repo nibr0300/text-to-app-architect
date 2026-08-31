@@ -44,6 +44,35 @@ export interface RoadmapRepairAttempt {
   blockers?: RepairBlocker[];
 }
 
+export type ProcessRootCause =
+  | "stage-too-large"
+  | "missing-library"
+  | "missing-external-tool"
+  | "wrong-method"
+  | "missing-information"
+  | "unrealistic-acceptance-criteria"
+  | "external-blocker"
+  | "model-limitation";
+
+export interface ProcessDiagnosis {
+  stepId: string;
+  stepTitle: string;
+  attempts: number;
+  rootCause: ProcessRootCause;
+  analysis: string;
+  recommendation: string;
+  /** Concrete method change: split into smaller stages, add dependency, change architecture, park. */
+  methodChange: "split" | "add-dependency" | "change-architecture" | "gather-information" | "park" | "keep";
+  suggestedDependencies?: string[];
+  suggestedDirectives?: string[];
+}
+
+export interface ProcessAudit {
+  summary: string;
+  systemicFindings: string[];
+  diagnoses: ProcessDiagnosis[];
+}
+
 export interface ReviewDelta {
   completeness: number;
   resolved: string[];
@@ -52,6 +81,7 @@ export interface ReviewDelta {
   critical: number;
   major: number;
 }
+
 
 export interface RoadmapRepairResult {
   files: import("@/types/generatedProject").GeneratedFile[];
@@ -81,12 +111,14 @@ export interface ReviewReport {
   nextSteps: string[];
   roadmap: ReviewRoadmapStep[];
   delta?: ReviewDelta;
+  processAudit?: ProcessAudit;
   sections: ReviewSection[];
   generatedAt: string;
   source: "generated" | "upload";
   fileCount: number;
   directives?: string[];
 }
+
 
 export type ReviewStageStatus = "pending" | "running" | "done" | "error";
 

@@ -58,14 +58,32 @@ const AREA_PROMPTS: Record<string, { title: string; instructions: string }> = {
 
 const AUDIT_SHAPE = `{"summary":"one or two sentences","findings":[{"id":"kebab-case-id","severity":"critical|major|minor|info","title":"short title","detail":"what is wrong and why it matters","paths":["app/src/..."],"suggestion":"concrete fix"}]}`;
 
-const VERDICT_PROMPT = `You receive the findings from every audit area (plus deterministic static-analysis results). Produce the overall verdict and ONE coherent completion roadmap.
+const PROCESS_PROMPT = `You are auditing the DEVELOPMENT PROCESS itself, not only the code. You receive the previous completion roadmap, every repair attempt made on each stage (strategy, outcome, rejection reason), the user's directives and the current static analysis.
+
+Your job is to learn from experience. A stage with 1-6 failed attempts — where identical strategies are already blocked — is proof that the METHOD is wrong, not that the model needs one more try. For each stalled stage determine the real root cause and prescribe a materially different way of working:
+- "stage-too-large": the stage bundles several cross-cutting refactors; prescribe splitting it into smaller, individually verifiable stages and name the split.
+- "missing-library" / "missing-external-tool": the outcome is unreachable without a dependency, plugin, Gradle configuration, generated wrapper or SDK; name the exact artifact (e.g. androidx.security:security-crypto, kotlinx-coroutines-test, Gradle wrapper, Hilt) and how to introduce it.
+- "wrong-method": the prescribed architecture is fighting the platform; name a concrete alternative architecture.
+- "missing-information": the acceptance criteria cannot be judged from the source alone; say what must be supplied.
+- "unrealistic-acceptance-criteria": criteria demand runtime proof (StrictMode runs, instrumentation tests) impossible in static generation; rewrite them into statically verifiable criteria.
+- "external-blocker": needs credentials, paid APIs, hardware or a product decision — park it.
+- "model-limitation": the batch is too big for one generation; prescribe a smaller file scope.
+
+Be specific and evidence-based; reference stage ids and file paths. Write user-visible text in Swedish. Return ONLY:
+{"summary":"2-3 sentences on how the process itself is performing","systemicFindings":["patterns across stages, e.g. every stage depends on one unbuilt foundation"],"diagnoses":[{"stepId":"existing stage id","stepTitle":"title","attempts":0,"rootCause":"stage-too-large|missing-library|missing-external-tool|wrong-method|missing-information|unrealistic-acceptance-criteria|external-blocker|model-limitation","analysis":"why previous attempts could not succeed","recommendation":"the concretely different way forward","methodChange":"split|add-dependency|change-architecture|gather-information|park|keep","suggestedDependencies":["exact artifact or tool"],"suggestedDirectives":["a directive the user could add"]}]}
+Only diagnose stages that actually have attempts or that block others.`;
+
+const VERDICT_PROMPT = `You receive the findings from every audit area (plus deterministic static-analysis results, and when available a process audit of the previous roadmap). Produce the overall verdict and ONE coherent completion roadmap.
 
 The roadmap is not a restatement of findings. Group findings that share a root cause or require coordinated cross-file changes into atomic stages. Order stages by dependency: build foundation first, then contracts/data/API, implementation, navigation/resources, and final quality. A later stage may depend on earlier stage ids. Every stage must have testable acceptance criteria. Never create competing fixes for the same root cause.
+
+The process audit is binding: a stage diagnosed as "stage-too-large" or "model-limitation" MUST be replaced by the smaller stages it prescribes; "missing-library"/"missing-external-tool" MUST become an explicit early stage that adds the named dependency or tooling before dependent work; "unrealistic-acceptance-criteria" MUST get statically verifiable criteria; "external-blocker"/"park" stages must NOT be recreated. Never reissue a stage in the same shape that already failed repeatedly.
 
 Return ONLY:
 {"completeness": 0-100 integer estimate of how much of a genuinely working app exists, "verdict":"2-4 sentences, direct and honest", "strengths":["what is genuinely well done"], "nextSteps":["prioritised actions, most important first"], "roadmap":[{"id":"stable-kebab-id","order":1,"title":"short stage title","objective":"the project-level outcome","rationale":"why these findings must be solved together","findingIds":["existing finding id"],"paths":["all files likely requiring coordinated edits"],"dependsOn":[],"acceptanceCriteria":["specific verifiable condition"]}]}
 
 Every critical or major finding must belong to exactly one roadmap stage. Use only finding ids and file paths present in the supplied audit. Weigh critical findings heavily: a project that cannot compile or whose core feature is placebo cannot score above 60.`;
+
 
 interface Finding {
   id?: string;
@@ -123,8 +141,10 @@ async function callModel(model: string, system: string, user: string) {
 interface HandlerResult {
   section?: unknown;
   verdict?: unknown;
+  processAudit?: unknown;
   error?: string;
 }
+
 
 interface RoadmapStepInput {
   id?: unknown;
@@ -172,8 +192,41 @@ function directiveBlock(directives: unknown): string {
     .join("\n")}\nA feature the user asked to remove must NOT be reported as a missing feature; instead report any remaining traces of it as findings to delete.`;
 }
 
+const ROOT_CAUSES = [
+  "stage-too-large",
+  "missing-library",
+  "missing-external-tool",
+  "wrong-method",
+  "missing-information",
+  "unrealistic-acceptance-criteria",
+  "external-blocker",
+  "model-limitation",
+];
+const METHOD_CHANGES = ["split", "add-dependency", "change-architecture", "gather-information", "park", "keep"];
+
+function sanitizeProcessAudit(parsed: Record<string, unknown>) {
+  const diagnoses = Array.isArray(parsed.diagnoses) ? parsed.diagnoses.slice(0, 15) : [];
+  return {
+    summary: typeof parsed.summary === "string" ? parsed.summary.slice(0, 1200) : "",
+    systemicFindings: stringList(parsed.systemicFindings, 10).map((item) => item.slice(0, 600)),
+    diagnoses: diagnoses
+      .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
+      .map((item) => ({
+        stepId: typeof item.stepId === "string" ? item.stepId.slice(0, 80) : "",
+        stepTitle: typeof item.stepTitle === "string" ? item.stepTitle.slice(0, 160) : "",
+        attempts: Number.isFinite(Number(item.attempts)) ? Math.max(0, Math.round(Number(item.attempts))) : 0,
+        rootCause: ROOT_CAUSES.includes(String(item.rootCause)) ? String(item.rootCause) : "wrong-method",
+        analysis: typeof item.analysis === "string" ? item.analysis.slice(0, 1200) : "",
+        recommendation: typeof item.recommendation === "string" ? item.recommendation.slice(0, 1200) : "",
+        methodChange: METHOD_CHANGES.includes(String(item.methodChange)) ? String(item.methodChange) : "keep",
+        suggestedDependencies: stringList(item.suggestedDependencies, 10),
+        suggestedDirectives: stringList(item.suggestedDirectives, 5),
+      })),
+  };
+}
+
 async function handle(body: Record<string, unknown>): Promise<HandlerResult> {
-  const { stage, area, spec, files, sections, lint, directives, excluded } = (body ?? {}) as {
+  const { stage, area, spec, files, sections, lint, directives, excluded, roadmap, processAudit } = (body ?? {}) as {
     stage?: string;
     area?: string;
     spec?: unknown;
@@ -182,7 +235,21 @@ async function handle(body: Record<string, unknown>): Promise<HandlerResult> {
     lint?: unknown;
     directives?: unknown;
     excluded?: { title?: string; reason?: string }[];
+    roadmap?: unknown;
+    processAudit?: unknown;
   };
+
+  if (stage === "process") {
+    if (!Array.isArray(roadmap) || !roadmap.length) return { error: "Ingen tidigare roadmap att utvärdera." };
+    let user = `PREVIOUS ROADMAP WITH FULL ATTEMPT HISTORY:\n${JSON.stringify(roadmap, null, 2)}\n\nSTATIC ANALYSIS:\n${JSON.stringify(lint ?? [], null, 2)}`;
+    if (Array.isArray(files) && files.length) {
+      user += `\n\nPROJECT FILE INDEX:\n${files.map((f) => f.path).join("\n")}`;
+    }
+    user += directiveBlock(directives);
+    const parsed = await callModel("openai/gpt-5.5", `${BASE}\n\n${PROCESS_PROMPT}`, user);
+    return { processAudit: sanitizeProcessAudit(parsed) };
+  }
+
 
   if (stage === "audit") {
     const cfg = area ? AREA_PROMPTS[area] : undefined;
@@ -231,8 +298,12 @@ async function handle(body: Record<string, unknown>): Promise<HandlerResult> {
         .map((item) => `- ${item.title}: ${item.reason ?? "parkerad"}`)
         .join("\n")}`;
     }
+    if (processAudit && typeof processAudit === "object") {
+      user += `\n\nPROCESS AUDIT OF THE PREVIOUS ROADMAP (binding — reshape the roadmap accordingly):\n${JSON.stringify(processAudit, null, 2)}`;
+    }
     const parsed = await callModel("openai/gpt-5.5", `${BASE}\n\n${VERDICT_PROMPT}`, user);
     const pct = Number(parsed.completeness);
+
     const sectionList = Array.isArray(sections) ? sections as { findings?: { id?: unknown }[] }[] : [];
     const validFindingIds = new Set(
       sectionList.flatMap((section) => section.findings ?? [])

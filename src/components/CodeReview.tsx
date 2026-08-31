@@ -3,7 +3,7 @@ import { AppSpec } from "@/types/appSpec";
 import { GeneratedFile } from "@/types/generatedProject";
 import { BuildContract } from "@/types/generatedProject";
 import { ReviewFinding, ReviewReport, ReviewRoadmapStep, ReviewSection, ReviewStage, RoadmapRepairResult } from "@/types/review";
-import { planReviewStages, repairRoadmapStep, reviewCodebase, RoadmapRepairError } from "@/lib/reviewCodebase";
+import { hasRepairExperience, planReviewStages, repairRoadmapStep, reviewCodebase, RoadmapRepairError } from "@/lib/reviewCodebase";
 import { ZipUpload } from "@/components/ZipUpload";
 import { FileTreeViewer } from "@/components/FileTreeViewer";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,8 @@ import { useToast } from "@/hooks/use-toast";
 import {
   AlertTriangle,
   Ban,
+  Brain,
+
   Check,
   Info,
   Loader2,
@@ -53,6 +55,18 @@ const SEVERITY_LABEL: Record<ReviewFinding["severity"], string> = {
 };
 
 const SEVERITY_ORDER: ReviewFinding["severity"][] = ["critical", "major", "minor", "info"];
+
+const ROOT_CAUSE_LABEL: Record<string, string> = {
+  "stage-too-large": "För stor etapp",
+  "missing-library": "Saknat bibliotek",
+  "missing-external-tool": "Saknat verktyg",
+  "wrong-method": "Fel metod",
+  "missing-information": "Saknad information",
+  "unrealistic-acceptance-criteria": "Orimliga kriterier",
+  "external-blocker": "Externt hinder",
+  "model-limitation": "Modellbegränsning",
+};
+
 
 function SeverityBadge({ severity }: { severity: ReviewFinding["severity"] }) {
   return (
@@ -145,7 +159,7 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
     setIsRunning(true);
     const previous = report;
     setLastRepair(null);
-    setStages(planReviewStages().map<ReviewStage>((s) => ({ ...s, status: "pending" })));
+    setStages(planReviewStages(hasRepairExperience(previous?.roadmap ?? [])).map<ReviewStage>((s) => ({ ...s, status: "pending" })));
 
     const update = (id: string, patch: Partial<ReviewStage>) =>
       setStages((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
@@ -418,6 +432,52 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
                 </p>
               </div>
             )}
+
+            {report.processAudit && (
+              <div className="rounded-lg border border-accent/40 bg-accent/5 p-3 space-y-2">
+                <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                  <Brain className="h-3.5 w-3.5 text-accent" /> Processgranskning — lärdom av tidigare försök
+                </p>
+                {report.processAudit.summary && (
+                  <p className="text-xs text-muted-foreground">{report.processAudit.summary}</p>
+                )}
+                {report.processAudit.systemicFindings.map((item, index) => (
+                  <p key={index} className="text-xs text-muted-foreground">• {item}</p>
+                ))}
+                {report.processAudit.diagnoses.map((diagnosis) => (
+                  <div key={diagnosis.stepId} className="rounded-md bg-surface-code p-2 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded border border-accent/40 bg-accent/10 px-1.5 py-0.5 text-[10px] font-mono uppercase text-accent">
+                        {ROOT_CAUSE_LABEL[diagnosis.rootCause] ?? diagnosis.rootCause}
+                      </span>
+                      <span className="text-xs font-medium text-foreground">{diagnosis.stepTitle || diagnosis.stepId}</span>
+                      <span className="text-[10px] font-mono text-muted-foreground">{diagnosis.attempts} försök</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{diagnosis.analysis}</p>
+                    <p className="text-xs text-foreground/80">Ny metod: {diagnosis.recommendation}</p>
+                    {(diagnosis.suggestedDependencies?.length ?? 0) > 0 && (
+                      <p className="text-[10px] font-mono text-muted-foreground break-all">
+                        Behövs: {diagnosis.suggestedDependencies?.join("  ·  ")}
+                      </p>
+                    )}
+                    {diagnosis.suggestedDirectives?.map((suggestion, index) => (
+                      <Button
+                        key={index}
+                        size="sm"
+                        variant="outline"
+                        className="h-6 gap-1.5 text-[10px]"
+                        disabled={directives.includes(suggestion)}
+                        onClick={() => setDirectives((current) => [...current, suggestion].slice(-20))}
+                      >
+                        <MessageSquare className="h-3 w-3" />
+                        {directives.includes(suggestion) ? "Tillagd riktlinje" : `Lägg till riktlinje: ${suggestion}`}
+                      </Button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+
 
             <div className="rounded-lg border border-accent/40 bg-accent/5 p-3 space-y-2">
               <p className="text-xs font-medium text-foreground flex items-center gap-1.5">

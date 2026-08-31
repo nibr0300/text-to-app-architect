@@ -1,6 +1,7 @@
 import { AppSpec } from "@/types/appSpec";
 import { BuildContract, GeneratedFile } from "@/types/generatedProject";
 import {
+  ProcessAudit,
   ReviewDelta,
   ReviewFinding,
   ReviewReport,
@@ -13,6 +14,7 @@ import {
 } from "@/types/review";
 import { LintIssue, lintProject } from "@/lib/lintProject";
 
+
 const REVIEW_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/review-codebase`;
 
 export const REVIEW_AREAS = [
@@ -22,16 +24,19 @@ export const REVIEW_AREAS = [
   { id: "buildability", label: "Byggbarhet & beroenden" },
 ] as const;
 
-export function planReviewStages() {
+export function planReviewStages(withProcessAudit = false) {
   return [
     { id: "lint", label: "Statisk analys (syntax, plattformsanrop, nycklar)" },
     ...REVIEW_AREAS.map((a) => ({ id: `area:${a.id}`, label: `AI-revision: ${a.label}` })),
+    ...(withProcessAudit
+      ? [{ id: "process", label: "Processgranskning: metodval, roadmap och tidigare försök" }]
+      : []),
     { id: "verdict", label: "Sammanvägt utlåtande" },
   ];
 }
 
 interface StageBody {
-  stage: "audit" | "verdict";
+  stage: "audit" | "verdict" | "process";
   area?: string;
   spec?: AppSpec | null;
   files?: GeneratedFile[];
@@ -39,7 +44,10 @@ interface StageBody {
   lint?: LintIssue[];
   directives?: string[];
   excluded?: { title: string; reason: string }[];
+  roadmap?: ReviewRoadmapStep[];
+  processAudit?: ProcessAudit | null;
 }
+
 
 function stableHash(value: string): string {
   let hash = 2166136261;
@@ -150,6 +158,28 @@ export interface ReviewOptions {
   excluded?: { title: string; reason: string }[];
 }
 
+/** The process audit is only meaningful once repair attempts exist to learn from. */
+export function hasRepairExperience(roadmap: ReviewRoadmapStep[]): boolean {
+  return roadmap.some((step) => (step.attempts?.length ?? 0) > 0);
+}
+
+/**
+ * A new roadmap stage that reuses an earlier stage id inherits its attempt history,
+ * so an already failed strategy stays blocked across reviews.
+ */
+export function carryOverAttempts(
+  roadmap: ReviewRoadmapStep[],
+  previousRoadmap: ReviewRoadmapStep[],
+): ReviewRoadmapStep[] {
+  const byId = new Map(previousRoadmap.map((step) => [step.id, step]));
+  return roadmap.map((step) => {
+    const prior = byId.get(step.id);
+    if (!prior?.attempts?.length) return step;
+    return { ...step, attempts: [...prior.attempts, ...(step.attempts ?? [])] };
+  });
+}
+
+
 export async function reviewCodebase(
   files: GeneratedFile[],
   spec: AppSpec | null,
@@ -188,6 +218,20 @@ export async function reviewCodebase(
     }
   }
 
+  const priorRoadmap = previous?.roadmap ?? [];
+  let processAudit: ProcessAudit | null = null;
+  if (hasRepairExperience(priorRoadmap)) {
+    cb.onStageStart("process");
+    try {
+      const res = await call({ stage: "process", roadmap: priorRoadmap, lint: issues, files, directives });
+      processAudit = (res.processAudit as ProcessAudit | undefined) ?? null;
+      cb.onStageDone("process");
+    } catch (e) {
+      // A failed process audit must never block the substantive review.
+      cb.onStageError("process", e instanceof Error ? e.message : "Okänt fel");
+    }
+  }
+
   cb.onStageStart("verdict");
   let verdict = {
     completeness: 0,
@@ -197,7 +241,7 @@ export async function reviewCodebase(
     roadmap: [] as ReviewRoadmapStep[],
   };
   try {
-    const res = await call({ stage: "verdict", sections, lint: issues, directives, excluded });
+    const res = await call({ stage: "verdict", sections, lint: issues, directives, excluded, processAudit });
     verdict = { ...verdict, ...(res.verdict as typeof verdict) };
     cb.onStageDone("verdict");
   } catch (e) {
@@ -208,6 +252,8 @@ export async function reviewCodebase(
 
   const report: ReviewReport = {
     ...verdict,
+    roadmap: carryOverAttempts(verdict.roadmap, priorRoadmap),
+    processAudit: processAudit ?? undefined,
     sections,
     generatedAt: new Date().toISOString(),
     source,
@@ -215,6 +261,7 @@ export async function reviewCodebase(
     directives,
   };
   report.delta = compareReports(report, previous);
+
   return report;
 }
 
