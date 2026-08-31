@@ -3,6 +3,7 @@ import { DescriptionInput } from "@/components/DescriptionInput";
 import { SpecViewer } from "@/components/SpecViewer";
 import { StreamingOutput } from "@/components/StreamingOutput";
 import { CodeGenerator } from "@/components/CodeGenerator";
+import { CodeReview } from "@/components/CodeReview";
 import { streamSpec } from "@/lib/streamSpec";
 import { AppSpec } from "@/types/appSpec";
 import { GeneratedFile } from "@/types/generatedProject";
