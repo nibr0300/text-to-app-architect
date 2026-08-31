@@ -71,6 +71,8 @@ const Index = () => {
     setStreamText("");
     setSpec(null);
     setRawJson("");
+    setFiles([]);
+
 
     let accumulated = "";
 
