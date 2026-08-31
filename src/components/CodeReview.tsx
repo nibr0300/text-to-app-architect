@@ -126,6 +126,15 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
     return map;
   }, [report]);
 
+  const parkedSteps = useMemo(
+    () => (report?.roadmap ?? []).filter((step) => step.status === "blocked" || step.status === "dismissed"),
+    [report],
+  );
+  const activeSteps = useMemo(
+    () => (report?.roadmap ?? []).filter((step) => step.status !== "blocked" && step.status !== "dismissed"),
+    [report],
+  );
+
   const handleRun = useCallback(async () => {
     if (!files.length) {
       toast({ title: "Ingen kodbas att granska", variant: "destructive" });
@@ -144,7 +153,13 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
         onStageStart: (id) => update(id, { status: "running" }),
         onStageDone: (id) => update(id, { status: "done" }),
         onStageError: (id, error) => update(id, { status: "error", error }),
-      }, previous);
+      }, previous, {
+        directives,
+        excluded: parkedSteps.map((step) => ({
+          title: step.title,
+          reason: step.status === "dismissed" ? "avfärdad av användaren" : "blockerad av externt hinder",
+        })),
+      });
       setReport(result);
       setHistory((current) => [...current.filter((item) => item.generatedAt !== result.generatedAt), result].slice(-5));
       toast({
@@ -160,7 +175,7 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
     } finally {
       setIsRunning(false);
     }
-  }, [files, spec, source, useUpload, toast, report]);
+  }, [files, spec, source, useUpload, toast, report, directives, parkedSteps]);
 
   const handleRepairStep = useCallback(
     async (step: ReviewRoadmapStep) => {
@@ -169,7 +184,7 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
       setLastRepair(null);
       try {
         const contract = useUpload ? null : loadJson<BuildContract>(CONTRACT_KEY);
-        const result = await repairRoadmapStep(useUpload ? null : spec, report, step, files, contract);
+        const result = await repairRoadmapStep(useUpload ? null : spec, report, step, files, contract, directives);
         if (result.changedPaths.length) {
           if (useUpload) setUploaded(result.files);
           else onFilesChange?.(result.files);
@@ -186,33 +201,71 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
         toast({
           title: result.status === "blocked" ? "Etappen har en extern blockerare" : "Roadmap-etappen tillämpad",
           description: result.status === "blocked"
-            ? "Säkra kodändringar sparades och blockeraren dokumenterades. Nästa etapp kan nu bedömas utan att denna markeras som verifierad."
+            ? "Säkra kodändringar sparades och etappen flyttas ned till parkerade punkter, så att nya åtgärder får plats."
             : `${result.changedPaths.length} samverkande fil(er) uppdaterades utan statisk regression. Kör en ny helhetsgranskning för verifiering.`,
         });
       } catch (e) {
         const message = e instanceof Error ? e.message : "Okänt fel";
-        if (e instanceof RoadmapRepairError && e.attempt.category !== "transient") {
+        const attempt = e instanceof RoadmapRepairError ? e.attempt : null;
+        if (attempt) {
           setReport((current) => current ? {
             ...current,
             roadmap: current.roadmap.map((item) => item.id === step.id ? {
               ...item,
-              attempts: [...(item.attempts ?? []), e.attempt],
+              attempts: [...(item.attempts ?? []), attempt],
             } : item),
           } : current);
         }
+        const isFirstTransient = attempt?.category === "transient";
         toast({
           title: "Kunde inte åtgärda",
-          description: e instanceof RoadmapRepairError && e.attempt.category !== "transient"
-            ? `${message} Nästa försök får denna återkoppling och måste använda en annan strategi.`
-            : `${message} Detta ser tillfälligt ut och räknas inte som en misslyckad lösningsstrategi.`,
+          description: isFirstTransient
+            ? `${message} Första gången detta ser ut som ett tillfälligt fel — upprepas det räknas det som en misslyckad strategi och nästa försök tvingas byta väg.`
+            : `${message} Försöket är sparat som misslyckat: nästa försök måste använda en annan strategi, annars avfärda eller styr om etappen med en riktlinje.`,
           variant: "destructive",
         });
       } finally {
         setFixingStep(null);
       }
     },
-    [files, spec, useUpload, onFilesChange, toast, report],
+    [files, spec, useUpload, onFilesChange, toast, report, directives],
   );
+
+  const handleDismissStep = useCallback((stepId: string) => {
+    setReport((current) => current ? {
+      ...current,
+      roadmap: current.roadmap.map((item) => item.id === stepId ? { ...item, status: "dismissed" as const } : item),
+    } : current);
+    toast({
+      title: "Etappen avfärdad",
+      description: "Punkten flyttas ned bland parkerade och tas inte upp igen vid nästa granskning.",
+    });
+  }, [toast]);
+
+  const handleApplyDirectives = useCallback(async () => {
+    if (!report || !directives.length) return;
+    await handleRepairStep({
+      id: `directive-${Date.now()}`,
+      order: 0,
+      title: "Användarriktlinjer",
+      objective: `Genomför användarens riktlinjer i hela kodbasen: ${directives.join(" | ")}`,
+      rationale: "Riktlinjerna överordnar spec och tidigare rekommendationer.",
+      findingIds: [],
+      paths: [],
+      dependsOn: [],
+      acceptanceCriteria: directives.map((item) => `Riktlinjen är helt genomförd: ${item}`),
+      status: "pending",
+      attempts: [],
+    });
+  }, [report, directives, handleRepairStep]);
+
+  const addDirective = useCallback(() => {
+    const value = draft.trim();
+    if (!value) return;
+    setDirectives((current) => [...current, value].slice(-20));
+    setDraft("");
+  }, [draft]);
+
 
   const renderSection = (section: ReviewSection) => {
     const sorted = [...section.findings].sort(
