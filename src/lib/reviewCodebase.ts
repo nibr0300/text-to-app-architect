@@ -37,6 +37,8 @@ interface StageBody {
   files?: GeneratedFile[];
   sections?: ReviewSection[];
   lint?: LintIssue[];
+  directives?: string[];
+  excluded?: { title: string; reason: string }[];
 }
 
 function stableHash(value: string): string {
