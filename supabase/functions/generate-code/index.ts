@@ -90,6 +90,18 @@ Return ONLY this JSON shape:
 Only include files you actually changed.`,
   review: `You receive the complete generated project file tree. Fix ONLY real correctness problems: missing/incorrect imports, references to classes or ids that do not exist, activities missing from the manifest, layout ids not matching ViewBinding usage, missing Gradle dependencies for used libraries, and Kotlin syntax errors.
 Return ONLY the files you actually changed (full content for each). If nothing needs changing return {"files":[]}.`,
+  repair: `A deterministic static analyzer found concrete defects in specific files. You receive those files and the exact issue list.
+
+For EVERY listed issue, return the complete corrected file:
+- unbalancedBrackets / strayToken / placeholder: repair the syntax so the file compiles. Remove corruption artifacts (stray identifiers after a closing brace), never delete working logic.
+- bleScanFilter: add ScanFilter with the relevant service UUID (heart rate = 0000180D-0000-1000-8000-00805f9b34fb) and ScanSettings, and only connect to a matching device.
+- playServicesCheck: guard with GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context) and surface a user-visible fallback instead of crashing.
+- toolbarMenu: also return res/menu/<name>.xml and inflate it properly so the menu item exists.
+- syntheticAudio: replace tone synthesis with a real media source (MediaController/AudioManager over the user's own player, a user-picked track, or res/raw the README asks the developer to supply).
+- paidApi / staticOAuthToken: add a real fallback path or the actual OAuth token-refresh flow.
+
+Return ONLY: {"files":[{"path":"...","content":"full corrected file"}],"report":{"checks":[{"id":"rule id","label":"short label in the contract's uiLanguage","status":"ok|fixed|warning","detail":"one sentence"}],"manualFollowUps":["..."]}}`,
+
 };
 
 interface HandlerResult {
