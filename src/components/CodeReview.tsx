@@ -11,9 +11,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import {
   AlertTriangle,
+  Ban,
   Check,
   Info,
   Loader2,
+  MessageSquare,
   ScanSearch,
   Sparkles,
   Route,
