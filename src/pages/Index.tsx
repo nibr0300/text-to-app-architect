@@ -3,6 +3,7 @@ import { DescriptionInput } from "@/components/DescriptionInput";
 import { SpecViewer } from "@/components/SpecViewer";
 import { StreamingOutput } from "@/components/StreamingOutput";
 import { CodeGenerator } from "@/components/CodeGenerator";
+import { CodeReview } from "@/components/CodeReview";
 import { streamSpec } from "@/lib/streamSpec";
 import { AppSpec } from "@/types/appSpec";
 import { GeneratedFile } from "@/types/generatedProject";
@@ -170,6 +171,12 @@ const Index = () => {
             <CodeGenerator spec={spec} files={files} onFilesChange={setFiles} />
           </section>
         )}
+
+        {/* Optional add-on: independent deep review — works with or without a spec */}
+        <section>
+          <CodeReview spec={spec} generatedFiles={files} onFilesChange={setFiles} />
+        </section>
+
 
       </main>
 
