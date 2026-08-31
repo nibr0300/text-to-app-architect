@@ -146,12 +146,21 @@ async function handleStage(body: Record<string, unknown>): Promise<HandlerResult
       .map((s) => `${s.id} (${s.name})`)
       .join(", ")}`;
   }
-  if (stage === "review" || stage === "integrate") {
+  if (stage === "review" || stage === "integrate" || stage === "repair") {
     const tree = files ?? [];
     userContent += `\n\nPROJECT FILES:\n${tree.map((f) => `--- ${f.path} ---\n${f.content}`).join("\n\n")}`;
   }
+  if (stage === "repair") {
+    userContent += `\n\nSTATIC ANALYSIS ISSUES (fix every one):\n${(issues ?? [])
+      .map((i) => `- [${i.severity ?? "error"}] ${i.path} (${i.rule}): ${i.message}`)
+      .join("\n")}`;
+  }
 
-  const model = stage === "contract" || stage === "integrate" ? "openai/gpt-5.5" : "google/gemini-3.7-flash";
+  const model =
+    stage === "contract" || stage === "integrate" || stage === "repair"
+      ? "openai/gpt-5.5"
+      : "google/gemini-3.7-flash";
+
 
   const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
