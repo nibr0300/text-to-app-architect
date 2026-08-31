@@ -85,6 +85,7 @@ export interface ReviewReport {
   generatedAt: string;
   source: "generated" | "upload";
   fileCount: number;
+  directives?: string[];
 }
 
 export type ReviewStageStatus = "pending" | "running" | "done" | "error";
