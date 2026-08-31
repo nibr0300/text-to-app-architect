@@ -72,8 +72,10 @@ export function planStages(spec: AppSpec) {
     { id: "data", label: "Datamodeller & nätverkslager" },
     { id: "integrate", label: "Integrationsgranskning (död kod, placebo-logik, säkerhet)" },
     { id: "review", label: "Kompileringsgranskning & korrigering" },
+    { id: "repair", label: "Statisk analys & reparation (syntax, BLE, Play Services, meny)" },
   ];
 }
+
 
 export interface GenerateProjectResult {
   files: GeneratedFile[];
