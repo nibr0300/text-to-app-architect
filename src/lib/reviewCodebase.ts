@@ -1,6 +1,13 @@
 import { AppSpec } from "@/types/appSpec";
-import { GeneratedFile } from "@/types/generatedProject";
-import { ReviewFinding, ReviewReport, ReviewSection } from "@/types/review";
+import { BuildContract, GeneratedFile } from "@/types/generatedProject";
+import {
+  ReviewDelta,
+  ReviewFinding,
+  ReviewReport,
+  ReviewRoadmapStep,
+  ReviewSection,
+  RoadmapRepairResult,
+} from "@/types/review";
 import { LintIssue, lintProject } from "@/lib/lintProject";
 
 const REVIEW_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/review-codebase`;
@@ -27,6 +34,34 @@ interface StageBody {
   files?: GeneratedFile[];
   sections?: ReviewSection[];
   lint?: LintIssue[];
+}
+
+function stableHash(value: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function normalizeText(value: string): string {
+  return value.toLocaleLowerCase("sv-SE").replace(/[^a-z0-9åäö]+/g, " ").trim();
+}
+
+export function findingFingerprint(finding: ReviewFinding): string {
+  const paths = [...finding.paths].sort().join("|");
+  return stableHash(`${paths}|${normalizeText(finding.title)}`);
+}
+
+function stabilizeSection(section: ReviewSection): ReviewSection {
+  return {
+    ...section,
+    findings: section.findings.map((finding) => {
+      const fingerprint = findingFingerprint(finding);
+      return { ...finding, id: `finding-${fingerprint}`, fingerprint };
+    }),
+  };
 }
 
 async function call(body: StageBody): Promise<Record<string, unknown>> {
@@ -61,7 +96,7 @@ const SEVERITY_BY_LINT: Record<string, ReviewFinding["severity"]> = {
 };
 
 export function lintSection(issues: LintIssue[]): ReviewSection {
-  return {
+  return stabilizeSection({
     id: "lint",
     title: "Statisk analys",
     summary: issues.length
@@ -74,6 +109,28 @@ export function lintSection(issues: LintIssue[]): ReviewSection {
       detail: issue.message,
       paths: [issue.path],
     })),
+  });
+}
+
+function allFindings(report: ReviewReport): ReviewFinding[] {
+  return report.sections.flatMap((section) => section.findings);
+}
+
+export function compareReports(current: ReviewReport, previous: ReviewReport | null): ReviewDelta | undefined {
+  if (!previous || previous.source !== current.source) return undefined;
+  const oldMap = new Map(allFindings(previous).map((finding) => [finding.fingerprint ?? findingFingerprint(finding), finding]));
+  const newMap = new Map(allFindings(current).map((finding) => [finding.fingerprint ?? findingFingerprint(finding), finding]));
+  const criticalNow = allFindings(current).filter((finding) => finding.severity === "critical").length;
+  const criticalBefore = allFindings(previous).filter((finding) => finding.severity === "critical").length;
+  const majorNow = allFindings(current).filter((finding) => finding.severity === "major").length;
+  const majorBefore = allFindings(previous).filter((finding) => finding.severity === "major").length;
+  return {
+    completeness: current.completeness - previous.completeness,
+    resolved: [...oldMap.keys()].filter((key) => !newMap.has(key)),
+    remaining: [...newMap.keys()].filter((key) => oldMap.has(key)),
+    introduced: [...newMap.keys()].filter((key) => !oldMap.has(key)),
+    critical: criticalNow - criticalBefore,
+    major: majorNow - majorBefore,
   };
 }
 
@@ -88,6 +145,7 @@ export async function reviewCodebase(
   spec: AppSpec | null,
   source: "generated" | "upload",
   cb: ReviewCallbacks,
+  previous: ReviewReport | null = null,
 ): Promise<ReviewReport> {
   const sections: ReviewSection[] = [];
 
@@ -104,8 +162,9 @@ export async function reviewCodebase(
       const res = await call({ stage: "audit", area: area.id, spec, files });
       const section = res.section as ReviewSection | undefined;
       if (section) {
-        sections.push(section);
-        cb.onStageDone(id, section);
+        const stableSection = stabilizeSection(section);
+        sections.push(stableSection);
+        cb.onStageDone(id, stableSection);
       } else {
         cb.onStageDone(id);
       }
@@ -122,6 +181,7 @@ export async function reviewCodebase(
     verdict: "",
     strengths: [] as string[],
     nextSteps: [] as string[],
+    roadmap: [] as ReviewRoadmapStep[],
   };
   try {
     const res = await call({ stage: "verdict", sections, lint: issues });
@@ -133,23 +193,51 @@ export async function reviewCodebase(
     throw e;
   }
 
-  return {
+  const report: ReviewReport = {
     ...verdict,
     sections,
     generatedAt: new Date().toISOString(),
     source,
     fileCount: files.length,
   };
+  report.delta = compareReports(report, previous);
+  return report;
 }
 
-/** Sends the files touched by a finding to the generator's repair stage. */
-export async function repairFinding(
+function mergeFiles(existing: GeneratedFile[], incoming: GeneratedFile[]): GeneratedFile[] {
+  const map = new Map(existing.map((file) => [file.path, file]));
+  for (const file of incoming) map.set(file.path, file);
+  return [...map.values()].sort((a, b) => a.path.localeCompare(b.path));
+}
+
+function isSafeProjectPath(path: string): boolean {
+  return path.length > 0 && path.length <= 500 && !path.startsWith("/") && !path.includes("\\") && !path.split("/").includes("..");
+}
+
+function lintKey(issue: LintIssue): string {
+  return `${issue.severity}|${issue.rule}|${issue.path}|${issue.line ?? ""}`;
+}
+
+interface ProjectRepairResponse {
+  files?: GeneratedFile[];
+  repair?: {
+    addressedFindingIds?: string[];
+    changedPaths?: string[];
+    manualFollowUps?: string[];
+  };
+  error?: string;
+}
+
+/** Applies one coordinated roadmap stage against the complete project tree. */
+export async function repairRoadmapStep(
   spec: AppSpec | null,
-  finding: ReviewFinding,
+  report: ReviewReport,
+  step: ReviewRoadmapStep,
   files: GeneratedFile[],
-): Promise<GeneratedFile[]> {
-  const affected = files.filter((f) => finding.paths.some((p) => f.path.endsWith(p) || p.endsWith(f.path)));
-  if (affected.length === 0) throw new Error("Hittade inga filer för den här punkten.");
+  contract: BuildContract | null = null,
+): Promise<RoadmapRepairResult> {
+  if (!files.length) throw new Error("Hittade inga projektfiler att reparera.");
+  const lintBefore = lintProject(files);
 
   const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-code`, {
     method: "POST",
@@ -158,17 +246,12 @@ export async function repairFinding(
       Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
     },
     body: JSON.stringify({
-      stage: "repair",
+      stage: "projectRepair",
       spec: spec ?? { appName: "Uppladdat projekt", packageName: "com.example.app" },
-      files: affected,
-      issues: [
-        {
-          path: finding.paths[0] ?? affected[0].path,
-          rule: finding.id,
-          severity: finding.severity === "critical" ? "error" : "warning",
-          message: `${finding.title}. ${finding.detail}${finding.suggestion ? ` Åtgärd: ${finding.suggestion}` : ""}`,
-        },
-      ],
+      files,
+      contract,
+      reviewReport: report,
+      roadmapStep: step,
     }),
   });
 
@@ -177,7 +260,34 @@ export async function repairFinding(
     throw new Error((data as { error?: string }).error || `Error ${resp.status}`);
   }
   const text = await resp.text();
-  const data = JSON.parse(text.trim()) as { files?: GeneratedFile[]; error?: string };
+  let data: ProjectRepairResponse;
+  try {
+    data = JSON.parse(text.trim()) as ProjectRepairResponse;
+  } catch {
+    throw new Error("AI:n returnerade ett ogiltigt reparationssvar.");
+  }
   if (data.error) throw new Error(data.error);
-  return data.files ?? [];
+  const changed = data.files ?? [];
+  if (!changed.length) throw new Error("AI:n returnerade inga ändrade filer för etappen.");
+  if (changed.some((file) => !isSafeProjectPath(file.path) || typeof file.content !== "string")) {
+    throw new Error("Reparationsbatchen innehöll en osäker eller ogiltig filsökväg och avvisades.");
+  }
+
+  const merged = mergeFiles(files, changed);
+  const lintAfter = lintProject(merged);
+  const beforeKeys = new Set(lintBefore.map(lintKey));
+  const introducedIssues = lintAfter.filter((issue) => !beforeKeys.has(lintKey(issue)));
+  if (introducedIssues.length || lintAfter.length > lintBefore.length) {
+    const reason = introducedIssues[0]?.message ?? "den statiska felbilden förvärrades";
+    throw new Error(`Batchen avvisades av regressionsskyddet: ${reason}. Ingen kod uppdaterades.`);
+  }
+
+  return {
+    files: merged,
+    changedPaths: changed.map((file) => file.path),
+    addressedFindingIds: data.repair?.addressedFindingIds ?? step.findingIds,
+    manualFollowUps: data.repair?.manualFollowUps ?? [],
+    lintBefore: lintBefore.length,
+    lintAfter: lintAfter.length,
+  };
 }
