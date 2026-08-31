@@ -2,12 +2,15 @@ import { useState, useCallback, useEffect } from "react";
 import { DescriptionInput } from "@/components/DescriptionInput";
 import { SpecViewer } from "@/components/SpecViewer";
 import { StreamingOutput } from "@/components/StreamingOutput";
+import { CodeGenerator } from "@/components/CodeGenerator";
 import { streamSpec } from "@/lib/streamSpec";
 import { AppSpec } from "@/types/appSpec";
+import { GeneratedFile } from "@/types/generatedProject";
 import { useToast } from "@/hooks/use-toast";
 import { Terminal, Smartphone } from "lucide-react";
 
 const SPEC_STORAGE_KEY = "nlp-programmer:last-spec";
+const CODE_STORAGE_KEY = "nlp-programmer:last-project";
 
 interface StoredResult {
   spec: AppSpec | null;
@@ -24,11 +27,22 @@ function loadStoredResult(): StoredResult | null {
   }
 }
 
+function loadStoredFiles(): GeneratedFile[] {
+  try {
+    const raw = localStorage.getItem(CODE_STORAGE_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw) as GeneratedFile[];
+  } catch {
+    return [];
+  }
+}
+
 const Index = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [streamText, setStreamText] = useState("");
   const [spec, setSpec] = useState<AppSpec | null>(() => loadStoredResult()?.spec ?? null);
   const [rawJson, setRawJson] = useState(() => loadStoredResult()?.rawJson ?? "");
+  const [files, setFiles] = useState<GeneratedFile[]>(() => loadStoredFiles());
   const { toast } = useToast();
 
   // Persist the latest generated spec so it survives leaving/reopening the app
@@ -41,11 +55,24 @@ const Index = () => {
     }
   }, [spec, rawJson]);
 
+  // Persist the generated Android project as well
+  useEffect(() => {
+    try {
+      if (files.length) localStorage.setItem(CODE_STORAGE_KEY, JSON.stringify(files));
+      else localStorage.removeItem(CODE_STORAGE_KEY);
+    } catch {
+      // Storage full or unavailable — ignore
+    }
+  }, [files]);
+
+
   const handleGenerate = useCallback((description: string) => {
     setIsLoading(true);
     setStreamText("");
     setSpec(null);
     setRawJson("");
+    setFiles([]);
+
 
     let accumulated = "";
 
@@ -137,6 +164,13 @@ const Index = () => {
             <SpecViewer spec={spec} rawJson={rawJson} />
           </section>
         )}
+
+        {spec && (
+          <section>
+            <CodeGenerator spec={spec} files={files} onFilesChange={setFiles} />
+          </section>
+        )}
+
       </main>
 
       {/* Footer */}
