@@ -417,17 +417,17 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
               </div>
             )}
 
-            {report.roadmap?.length > 0 && (
+            {activeSteps.length > 0 && (
               <div className="rounded-lg border border-border p-3 space-y-3">
                 <div>
                   <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
                     <Route className="h-3.5 w-3.5 text-primary" /> Roadmap till byggbar app
                   </p>
-                  <p className="text-[10px] text-muted-foreground mt-1">Varje etapp repareras atomiskt med hela projektet och hela granskningsrapporten som kontext.</p>
+                  <p className="text-[10px] text-muted-foreground mt-1">Varje etapp repareras atomiskt med hela projektet som kontext. Blockerade och avfärdade punkter flyttas längst ned och tar ingen plats i listan.</p>
                 </div>
-                {report.roadmap.map((step) => {
+                {activeSteps.map((step) => {
                   const dependenciesReady = step.dependsOn.every((id) =>
-                    report.roadmap.some((candidate) => candidate.id === id && (candidate.status === "applied" || candidate.status === "verified" || candidate.status === "blocked")),
+                    report.roadmap.some((candidate) => candidate.id === id && candidate.status && candidate.status !== "pending"),
                   );
                   return (
                     <div key={step.id} className="border-l-2 border-primary/30 pl-3 space-y-1.5">
@@ -454,21 +454,33 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
                           ))}
                         </div>
                       )}
-                      <Button
-                        size="sm"
-                        variant={step.status === "applied" ? "outline" : "default"}
-                        className="h-7 gap-1.5 text-xs"
-                        disabled={!dependenciesReady || fixingStep !== null || step.status === "applied" || step.status === "blocked"}
-                        onClick={() => void handleRepairStep(step)}
-                      >
-                        {fixingStep === step.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Route className="h-3.5 w-3.5" />}
-                        {step.status === "applied" ? "Tillämpad — inväntar ny granskning" : step.status === "blocked" ? "Blockerad dokumenterad — fortsätt" : dependenciesReady ? (step.attempts?.length ? "Försök med annan strategi" : "Åtgärda denna etapp") : "Inväntar föregående etapp"}
-                      </Button>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant={step.status === "applied" ? "outline" : "default"}
+                          className="h-7 gap-1.5 text-xs"
+                          disabled={!dependenciesReady || fixingStep !== null || step.status === "applied"}
+                          onClick={() => void handleRepairStep(step)}
+                        >
+                          {fixingStep === step.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Route className="h-3.5 w-3.5" />}
+                          {step.status === "applied" ? "Tillämpad — inväntar ny granskning" : dependenciesReady ? (step.attempts?.length ? "Försök med annan strategi" : "Åtgärda denna etapp") : "Inväntar föregående etapp"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 gap-1.5 text-xs text-muted-foreground"
+                          disabled={fixingStep !== null}
+                          onClick={() => handleDismissStep(step.id)}
+                        >
+                          <Ban className="h-3.5 w-3.5" /> Avfärda
+                        </Button>
+                      </div>
                     </div>
                   );
                 })}
               </div>
             )}
+
 
             {lastRepair && (
               <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-1">
