@@ -141,8 +141,10 @@ async function callModel(model: string, system: string, user: string) {
 interface HandlerResult {
   section?: unknown;
   verdict?: unknown;
+  processAudit?: unknown;
   error?: string;
 }
+
 
 interface RoadmapStepInput {
   id?: unknown;
