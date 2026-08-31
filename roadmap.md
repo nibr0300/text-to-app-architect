@@ -12,3 +12,5 @@
 - [x] Verifiera loopskydd, tillfälliga fel och regressionsavvisning- [x] Egna riktlinjer som överordnar spec, granskning och roadmap
 - [x] Blockerade/avfärdade etapper parkeras längst ned och återskapas inte
 - [x] Ärlig felklassning: upprepade "tillfälliga" fel räknas som misslyckad strategi
+- [x] Processgranskning: utvärdera metodval, roadmap och tidigare försök
+- [x] Roadmapen formas om av processgranskningens diagnos (dela upp, lägg till beroende, byt arkitektur, parkera)
