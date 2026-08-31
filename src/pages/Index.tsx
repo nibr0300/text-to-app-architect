@@ -172,6 +172,12 @@ const Index = () => {
           </section>
         )}
 
+        {/* Optional add-on: independent deep review — works with or without a spec */}
+        <section>
+          <CodeReview spec={spec} generatedFiles={files} onFilesChange={setFiles} />
+        </section>
+
+
       </main>
 
       {/* Footer */}
