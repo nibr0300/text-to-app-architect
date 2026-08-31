@@ -158,6 +158,28 @@ export interface ReviewOptions {
   excluded?: { title: string; reason: string }[];
 }
 
+/** The process audit is only meaningful once repair attempts exist to learn from. */
+export function hasRepairExperience(roadmap: ReviewRoadmapStep[]): boolean {
+  return roadmap.some((step) => (step.attempts?.length ?? 0) > 0);
+}
+
+/**
+ * A new roadmap stage that reuses an earlier stage id inherits its attempt history,
+ * so an already failed strategy stays blocked across reviews.
+ */
+export function carryOverAttempts(
+  roadmap: ReviewRoadmapStep[],
+  previousRoadmap: ReviewRoadmapStep[],
+): ReviewRoadmapStep[] {
+  const byId = new Map(previousRoadmap.map((step) => [step.id, step]));
+  return roadmap.map((step) => {
+    const prior = byId.get(step.id);
+    if (!prior?.attempts?.length) return step;
+    return { ...step, attempts: [...prior.attempts, ...(step.attempts ?? [])] };
+  });
+}
+
+
 export async function reviewCodebase(
   files: GeneratedFile[],
   spec: AppSpec | null,
