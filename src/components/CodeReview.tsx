@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppSpec } from "@/types/appSpec";
 import { GeneratedFile } from "@/types/generatedProject";
-import { ReviewFinding, ReviewReport, ReviewSection, ReviewStage } from "@/types/review";
-import { planReviewStages, repairFinding, reviewCodebase } from "@/lib/reviewCodebase";
+import { BuildContract } from "@/types/generatedProject";
+import { ReviewFinding, ReviewReport, ReviewRoadmapStep, ReviewSection, ReviewStage, RoadmapRepairResult } from "@/types/review";
+import { planReviewStages, repairRoadmapStep, reviewCodebase } from "@/lib/reviewCodebase";
 import { ZipUpload } from "@/components/ZipUpload";
 import { FileTreeViewer } from "@/components/FileTreeViewer";
 import { Button } from "@/components/ui/button";
@@ -15,7 +16,8 @@ import {
   Loader2,
   ScanSearch,
   Sparkles,
-  Wrench,
+  Route,
+  ShieldAlert,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -27,7 +29,9 @@ interface CodeReviewProps {
 }
 
 const REPORT_KEY = "nlp-programmer:last-review";
+const HISTORY_KEY = "nlp-programmer:review-history";
 const UPLOAD_KEY = "nlp-programmer:review-upload";
+const CONTRACT_KEY = "nlp-programmer:last-contract";
 
 function loadJson<T>(key: string): T | null {
   try {
@@ -69,7 +73,9 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
   const [stages, setStages] = useState<ReviewStage[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [report, setReport] = useState<ReviewReport | null>(() => loadJson<ReviewReport>(REPORT_KEY));
-  const [fixing, setFixing] = useState<string | null>(null);
+  const [history, setHistory] = useState<ReviewReport[]>(() => loadJson<ReviewReport[]>(HISTORY_KEY) ?? []);
+  const [fixingStep, setFixingStep] = useState<string | null>(null);
+  const [lastRepair, setLastRepair] = useState<RoadmapRepairResult | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -80,6 +86,14 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
       // ignore
     }
   }, [report]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(-5)));
+    } catch {
+      // ignore
+    }
+  }, [history]);
 
   useEffect(() => {
     try {
@@ -106,7 +120,8 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
       return;
     }
     setIsRunning(true);
-    setReport(null);
+    const previous = report;
+    setLastRepair(null);
     setStages(planReviewStages().map<ReviewStage>((s) => ({ ...s, status: "pending" })));
 
     const update = (id: string, patch: Partial<ReviewStage>) =>
@@ -117,8 +132,9 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
         onStageStart: (id) => update(id, { status: "running" }),
         onStageDone: (id) => update(id, { status: "done" }),
         onStageError: (id, error) => update(id, { status: "error", error }),
-      });
+      }, previous);
       setReport(result);
+      setHistory((current) => [...current.filter((item) => item.generatedAt !== result.generatedAt), result].slice(-5));
       toast({
         title: "Granskning klar",
         description: `Uppskattad färdighetsgrad: ${result.completeness}%.`,
@@ -132,22 +148,26 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
     } finally {
       setIsRunning(false);
     }
-  }, [files, spec, source, useUpload, toast]);
+  }, [files, spec, source, useUpload, toast, report]);
 
-  const handleFix = useCallback(
-    async (finding: ReviewFinding) => {
-      setFixing(finding.id);
+  const handleRepairStep = useCallback(
+    async (step: ReviewRoadmapStep) => {
+      if (!report) return;
+      setFixingStep(step.id);
+      setLastRepair(null);
       try {
-        const fixed = await repairFinding(useUpload ? null : spec, finding, files);
-        if (!fixed.length) throw new Error("AI:n returnerade inga ändrade filer.");
-        const map = new Map(files.map((f) => [f.path, f]));
-        for (const f of fixed) map.set(f.path, f);
-        const merged = Array.from(map.values()).sort((a, b) => a.path.localeCompare(b.path));
-        if (useUpload) setUploaded(merged);
-        else onFilesChange?.(merged);
+        const contract = useUpload ? null : loadJson<BuildContract>(CONTRACT_KEY);
+        const result = await repairRoadmapStep(useUpload ? null : spec, report, step, files, contract);
+        if (useUpload) setUploaded(result.files);
+        else onFilesChange?.(result.files);
+        setLastRepair(result);
+        setReport((current) => current ? {
+          ...current,
+          roadmap: current.roadmap.map((item) => item.id === step.id ? { ...item, status: "applied" } : item),
+        } : current);
         toast({
-          title: "Åtgärdad",
-          description: `${fixed.length} fil(er) uppdaterade. Kör granskningen igen för att verifiera.`,
+          title: "Roadmap-etappen tillämpad",
+          description: `${result.changedPaths.length} samverkande fil(er) uppdaterades utan statisk regression. Kör en ny helhetsgranskning för verifiering.`,
         });
       } catch (e) {
         toast({
@@ -156,10 +176,10 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
           variant: "destructive",
         });
       } finally {
-        setFixing(null);
+        setFixingStep(null);
       }
     },
-    [files, spec, useUpload, onFilesChange, toast],
+    [files, spec, useUpload, onFilesChange, toast, report],
   );
 
   const renderSection = (section: ReviewSection) => {
@@ -189,22 +209,6 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
               <p className="text-[10px] font-mono text-muted-foreground break-all">
                 {finding.paths.join("  ·  ")}
               </p>
-            )}
-            {finding.paths.length > 0 && (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 gap-1 text-xs"
-                disabled={fixing !== null}
-                onClick={() => void handleFix(finding)}
-              >
-                {fixing === finding.id ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Wrench className="h-3.5 w-3.5" />
-                )}
-                Åtgärda med AI
-              </Button>
             )}
           </div>
         ))}
@@ -307,6 +311,75 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
                 ))}
               </div>
             </div>
+
+            {report.delta && (
+              <div className={cn(
+                "rounded-lg border p-3 space-y-1",
+                report.delta.completeness >= 0 && report.delta.critical <= 0 && report.delta.major <= 0
+                  ? "border-primary/30 bg-primary/5"
+                  : "border-destructive/40 bg-destructive/10",
+              )}>
+                <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                  {report.delta.completeness >= 0 ? <Route className="h-3.5 w-3.5 text-primary" /> : <ShieldAlert className="h-3.5 w-3.5 text-destructive" />}
+                  Förändring sedan föregående granskning
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Färdighetsgrad {report.delta.completeness >= 0 ? "+" : ""}{report.delta.completeness} procentenheter · lösta {report.delta.resolved.length} · kvar {report.delta.remaining.length} · nya {report.delta.introduced.length}
+                </p>
+                <p className="text-[10px] font-mono text-muted-foreground">
+                  Kritiska {report.delta.critical >= 0 ? "+" : ""}{report.delta.critical} · allvarliga {report.delta.major >= 0 ? "+" : ""}{report.delta.major}
+                </p>
+              </div>
+            )}
+
+            {report.roadmap?.length > 0 && (
+              <div className="rounded-lg border border-border p-3 space-y-3">
+                <div>
+                  <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                    <Route className="h-3.5 w-3.5 text-primary" /> Roadmap till byggbar app
+                  </p>
+                  <p className="text-[10px] text-muted-foreground mt-1">Varje etapp repareras atomiskt med hela projektet och hela granskningsrapporten som kontext.</p>
+                </div>
+                {report.roadmap.map((step) => {
+                  const dependenciesReady = step.dependsOn.every((id) =>
+                    report.roadmap.some((candidate) => candidate.id === id && (candidate.status === "applied" || candidate.status === "verified")),
+                  );
+                  return (
+                    <div key={step.id} className="border-l-2 border-primary/30 pl-3 space-y-1.5">
+                      <div className="flex items-start gap-2">
+                        <span className="text-[10px] font-mono text-primary shrink-0">{step.order}.</span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-medium text-foreground">{step.title}</p>
+                          <p className="text-xs text-muted-foreground">{step.objective}</p>
+                        </div>
+                      </div>
+                      {step.dependsOn.length > 0 && <p className="text-[10px] font-mono text-muted-foreground">Beroenden: {step.dependsOn.join(", ")}</p>}
+                      {step.acceptanceCriteria.map((criterion, index) => (
+                        <p key={index} className="text-[10px] text-muted-foreground">✓ {criterion}</p>
+                      ))}
+                      <Button
+                        size="sm"
+                        variant={step.status === "applied" ? "outline" : "default"}
+                        className="h-7 gap-1.5 text-xs"
+                        disabled={!dependenciesReady || fixingStep !== null || step.status === "applied"}
+                        onClick={() => void handleRepairStep(step)}
+                      >
+                        {fixingStep === step.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Route className="h-3.5 w-3.5" />}
+                        {step.status === "applied" ? "Tillämpad — inväntar ny granskning" : dependenciesReady ? "Åtgärda denna etapp" : "Inväntar föregående etapp"}
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {lastRepair && (
+              <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-1">
+                <p className="text-xs font-medium text-foreground">Senaste reparationsbatch</p>
+                <p className="text-xs text-muted-foreground">{lastRepair.changedPaths.length} filer ändrade · statiska avvikelser {lastRepair.lintBefore} → {lastRepair.lintAfter}</p>
+                {lastRepair.manualFollowUps.map((item, index) => <p key={index} className="text-xs text-accent">Manuellt: {item}</p>)}
+              </div>
+            )}
 
             {report.strengths.length > 0 && (
               <div className="rounded-lg border border-border p-3 space-y-1">
