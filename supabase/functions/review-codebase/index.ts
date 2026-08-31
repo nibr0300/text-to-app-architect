@@ -190,8 +190,41 @@ function directiveBlock(directives: unknown): string {
     .join("\n")}\nA feature the user asked to remove must NOT be reported as a missing feature; instead report any remaining traces of it as findings to delete.`;
 }
 
+const ROOT_CAUSES = [
+  "stage-too-large",
+  "missing-library",
+  "missing-external-tool",
+  "wrong-method",
+  "missing-information",
+  "unrealistic-acceptance-criteria",
+  "external-blocker",
+  "model-limitation",
+];
+const METHOD_CHANGES = ["split", "add-dependency", "change-architecture", "gather-information", "park", "keep"];
+
+function sanitizeProcessAudit(parsed: Record<string, unknown>) {
+  const diagnoses = Array.isArray(parsed.diagnoses) ? parsed.diagnoses.slice(0, 15) : [];
+  return {
+    summary: typeof parsed.summary === "string" ? parsed.summary.slice(0, 1200) : "",
+    systemicFindings: stringList(parsed.systemicFindings, 10).map((item) => item.slice(0, 600)),
+    diagnoses: diagnoses
+      .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
+      .map((item) => ({
+        stepId: typeof item.stepId === "string" ? item.stepId.slice(0, 80) : "",
+        stepTitle: typeof item.stepTitle === "string" ? item.stepTitle.slice(0, 160) : "",
+        attempts: Number.isFinite(Number(item.attempts)) ? Math.max(0, Math.round(Number(item.attempts))) : 0,
+        rootCause: ROOT_CAUSES.includes(String(item.rootCause)) ? String(item.rootCause) : "wrong-method",
+        analysis: typeof item.analysis === "string" ? item.analysis.slice(0, 1200) : "",
+        recommendation: typeof item.recommendation === "string" ? item.recommendation.slice(0, 1200) : "",
+        methodChange: METHOD_CHANGES.includes(String(item.methodChange)) ? String(item.methodChange) : "keep",
+        suggestedDependencies: stringList(item.suggestedDependencies, 10),
+        suggestedDirectives: stringList(item.suggestedDirectives, 5),
+      })),
+  };
+}
+
 async function handle(body: Record<string, unknown>): Promise<HandlerResult> {
-  const { stage, area, spec, files, sections, lint, directives, excluded } = (body ?? {}) as {
+  const { stage, area, spec, files, sections, lint, directives, excluded, roadmap, processAudit } = (body ?? {}) as {
     stage?: string;
     area?: string;
     spec?: unknown;
@@ -200,7 +233,21 @@ async function handle(body: Record<string, unknown>): Promise<HandlerResult> {
     lint?: unknown;
     directives?: unknown;
     excluded?: { title?: string; reason?: string }[];
+    roadmap?: unknown;
+    processAudit?: unknown;
   };
+
+  if (stage === "process") {
+    if (!Array.isArray(roadmap) || !roadmap.length) return { error: "Ingen tidigare roadmap att utvärdera." };
+    let user = `PREVIOUS ROADMAP WITH FULL ATTEMPT HISTORY:\n${JSON.stringify(roadmap, null, 2)}\n\nSTATIC ANALYSIS:\n${JSON.stringify(lint ?? [], null, 2)}`;
+    if (Array.isArray(files) && files.length) {
+      user += `\n\nPROJECT FILE INDEX:\n${files.map((f) => f.path).join("\n")}`;
+    }
+    user += directiveBlock(directives);
+    const parsed = await callModel("openai/gpt-5.5", `${BASE}\n\n${PROCESS_PROMPT}`, user);
+    return { processAudit: sanitizeProcessAudit(parsed) };
+  }
+
 
   if (stage === "audit") {
     const cfg = area ? AREA_PROMPTS[area] : undefined;
