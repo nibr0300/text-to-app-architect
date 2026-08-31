@@ -186,7 +186,85 @@ export function lintProject(files: GeneratedFile[]): LintIssue[] {
         });
       }
     }
+
+    if (/\.kt$|\.java$|\.gradle(\.kts)?$|\.xml$/.test(path)) {
+      issues.push(...secretIssues(path, content));
+    }
   }
+
+  issues.push(...projectIssues(files));
 
   return issues;
 }
+
+const SECRET_PATTERNS: [RegExp, string][] = [
+  [/AIza[0-9A-Za-z_-]{30,}/, "Google API-nyckel"],
+  [/sk-[A-Za-z0-9]{20,}/, "OpenAI-nyckel"],
+  [/gh[pous]_[A-Za-z0-9]{20,}/, "GitHub-token"],
+  [/\b[A-Za-z0-9_-]*(?:apiKey|api_key|clientSecret|client_secret|accessToken)\b\s*[:=]\s*"[^"$]{12,}"/, "hårdkodad hemlighet"],
+];
+
+function secretIssues(path: string, content: string): LintIssue[] {
+  const out: LintIssue[] = [];
+  for (const [re, label] of SECRET_PATTERNS) {
+    const m = content.match(re);
+    if (m) {
+      out.push({
+        path,
+        severity: "error",
+        rule: "hardcodedSecret",
+        message: `Möjlig ${label} hårdkodad i källkoden — flytta till local.properties och läs via BuildConfig.`,
+      });
+      break;
+    }
+  }
+  return out;
+}
+
+/** Cross-file checks: manifest registration and Gradle dependencies that nothing uses. */
+function projectIssues(files: GeneratedFile[]): LintIssue[] {
+  const out: LintIssue[] = [];
+  const manifest = files.find((f) => f.path.endsWith("AndroidManifest.xml"));
+  const kotlin = files.filter((f) => f.path.endsWith(".kt") || f.path.endsWith(".java"));
+
+  if (manifest) {
+    for (const file of kotlin) {
+      const name = file.path.split("/").pop()?.replace(/\.(kt|java)$/, "") ?? "";
+      if (!name.endsWith("Activity")) continue;
+      if (!new RegExp(`class\\s+${name}\\s*[:(]`).test(file.content)) continue;
+      if (!manifest.content.includes(name)) {
+        out.push({
+          path: manifest.path,
+          severity: "error",
+          rule: "missingManifestActivity",
+          message: `${name} är inte registrerad i AndroidManifest.xml — appen kraschar när skärmen öppnas.`,
+        });
+      }
+    }
+  }
+
+  const gradle = files.find((f) => f.path.endsWith("app/build.gradle.kts") || f.path.endsWith("app/build.gradle"));
+  if (gradle) {
+    const allSource = kotlin.map((f) => f.content).join("\n");
+    const deps = Array.from(
+      gradle.content.matchAll(/["']([a-z0-9.\-_]+):([a-z0-9\-_.]+):[^"']+["']/gi),
+    );
+    for (const [, group, artifact] of deps) {
+      if (/^(androidx\.(core|appcompat|constraintlayout|activity|fragment)|com\.google\.android\.material|org\.jetbrains\.kotlin)/.test(group))
+        continue;
+      const hint = artifact.split("-")[0];
+      const groupRoot = group.split(".").slice(0, 3).join(".");
+      if (!allSource.includes(groupRoot) && !new RegExp(`\\b${hint}\\b`, "i").test(allSource)) {
+        out.push({
+          path: gradle.path,
+          severity: "warning",
+          rule: "unusedDependency",
+          message: `Beroendet ${group}:${artifact} deklareras men importeras aldrig i koden — död dependency eller saknad implementation.`,
+        });
+      }
+    }
+  }
+
+  return out;
+}
+
