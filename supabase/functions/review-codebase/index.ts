@@ -298,8 +298,12 @@ async function handle(body: Record<string, unknown>): Promise<HandlerResult> {
         .map((item) => `- ${item.title}: ${item.reason ?? "parkerad"}`)
         .join("\n")}`;
     }
+    if (processAudit && typeof processAudit === "object") {
+      user += `\n\nPROCESS AUDIT OF THE PREVIOUS ROADMAP (binding — reshape the roadmap accordingly):\n${JSON.stringify(processAudit, null, 2)}`;
+    }
     const parsed = await callModel("openai/gpt-5.5", `${BASE}\n\n${VERDICT_PROMPT}`, user);
     const pct = Number(parsed.completeness);
+
     const sectionList = Array.isArray(sections) ? sections as { findings?: { id?: unknown }[] }[] : [];
     const validFindingIds = new Set(
       sectionList.flatMap((section) => section.findings ?? [])
