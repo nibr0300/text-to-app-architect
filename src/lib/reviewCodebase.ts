@@ -22,16 +22,19 @@ export const REVIEW_AREAS = [
   { id: "buildability", label: "Byggbarhet & beroenden" },
 ] as const;
 
-export function planReviewStages() {
+export function planReviewStages(withProcessAudit = false) {
   return [
     { id: "lint", label: "Statisk analys (syntax, plattformsanrop, nycklar)" },
     ...REVIEW_AREAS.map((a) => ({ id: `area:${a.id}`, label: `AI-revision: ${a.label}` })),
+    ...(withProcessAudit
+      ? [{ id: "process", label: "Processgranskning: metodval, roadmap och tidigare försök" }]
+      : []),
     { id: "verdict", label: "Sammanvägt utlåtande" },
   ];
 }
 
 interface StageBody {
-  stage: "audit" | "verdict";
+  stage: "audit" | "verdict" | "process";
   area?: string;
   spec?: AppSpec | null;
   files?: GeneratedFile[];
@@ -39,7 +42,10 @@ interface StageBody {
   lint?: LintIssue[];
   directives?: string[];
   excluded?: { title: string; reason: string }[];
+  roadmap?: ReviewRoadmapStep[];
+  processAudit?: ProcessAudit | null;
 }
+
 
 function stableHash(value: string): string {
   let hash = 2166136261;
