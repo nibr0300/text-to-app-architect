@@ -1,9 +1,10 @@
 import { AppSpec, Screen } from "@/types/appSpec";
 import { BuildContract, GeneratedFile, QualityReport } from "@/types/generatedProject";
+import { LintIssue, lintProject } from "@/lib/lintProject";
 
 const CODE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-code`;
 
-type Stage = "contract" | "skeleton" | "screen" | "data" | "integrate" | "review";
+type Stage = "contract" | "skeleton" | "screen" | "data" | "integrate" | "review" | "repair";
 
 interface StageResponse {
   files: GeneratedFile[];
@@ -17,7 +18,9 @@ async function callStage(payload: {
   screen?: Screen;
   files?: GeneratedFile[];
   contract?: BuildContract | null;
+  issues?: LintIssue[];
 }): Promise<StageResponse> {
+
   const resp = await fetch(CODE_URL, {
     method: "POST",
     headers: {
