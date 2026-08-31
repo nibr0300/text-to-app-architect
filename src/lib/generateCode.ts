@@ -1,16 +1,23 @@
 import { AppSpec, Screen } from "@/types/appSpec";
-import { GeneratedFile } from "@/types/generatedProject";
+import { BuildContract, GeneratedFile, QualityReport } from "@/types/generatedProject";
 
 const CODE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-code`;
 
-type Stage = "skeleton" | "screen" | "data" | "review";
+type Stage = "contract" | "skeleton" | "screen" | "data" | "integrate" | "review";
+
+interface StageResponse {
+  files: GeneratedFile[];
+  contract: BuildContract | null;
+  report: QualityReport | null;
+}
 
 async function callStage(payload: {
   stage: Stage;
   spec: AppSpec;
   screen?: Screen;
   files?: GeneratedFile[];
-}): Promise<GeneratedFile[]> {
+  contract?: BuildContract | null;
+}): Promise<StageResponse> {
   const resp = await fetch(CODE_URL, {
     method: "POST",
     headers: {
@@ -26,7 +33,11 @@ async function callStage(payload: {
   }
 
   const data = await resp.json();
-  return (data.files ?? []) as GeneratedFile[];
+  return {
+    files: (data.files ?? []) as GeneratedFile[],
+    contract: (data.contract ?? null) as BuildContract | null,
+    report: (data.report ?? null) as QualityReport | null,
+  };
 }
 
 function merge(existing: GeneratedFile[], incoming: GeneratedFile[]): GeneratedFile[] {
@@ -39,29 +50,45 @@ export interface GenerateProjectCallbacks {
   onStageStart: (id: string) => void;
   onStageDone: (id: string, files: GeneratedFile[], all: GeneratedFile[]) => void;
   onStageError: (id: string, error: string) => void;
+  onReport?: (report: QualityReport) => void;
 }
 
 export function planStages(spec: AppSpec) {
   return [
+    { id: "contract", label: "Byggkontrakt (klasser, ägarskap, bibliotek)" },
     { id: "skeleton", label: "Projektskelett (Gradle, manifest, tema)" },
     ...(spec.screens ?? []).map((s) => ({ id: `screen:${s.id}`, label: `Skärm: ${s.name}` })),
     { id: "data", label: "Datamodeller & nätverkslager" },
-    { id: "review", label: "Granskning & korrigering" },
+    { id: "integrate", label: "Integrationsgranskning (död kod, placebo-logik, säkerhet)" },
+    { id: "review", label: "Kompileringsgranskning & korrigering" },
   ];
+}
+
+export interface GenerateProjectResult {
+  files: GeneratedFile[];
+  contract: BuildContract | null;
+  report: QualityReport | null;
 }
 
 export async function generateProject(
   spec: AppSpec,
   cb: GenerateProjectCallbacks,
-): Promise<GeneratedFile[]> {
+): Promise<GenerateProjectResult> {
   let all: GeneratedFile[] = [];
+  let contract: BuildContract | null = null;
+  let report: QualityReport | null = null;
 
-  const run = async (id: string, fn: () => Promise<GeneratedFile[]>) => {
+  const run = async (id: string, fn: () => Promise<StageResponse>) => {
     cb.onStageStart(id);
     try {
-      const files = await fn();
-      all = merge(all, files);
-      cb.onStageDone(id, files, all);
+      const res = await fn();
+      if (res.contract) contract = res.contract;
+      if (res.report) {
+        report = res.report;
+        cb.onReport?.(res.report);
+      }
+      all = merge(all, res.files);
+      cb.onStageDone(id, res.files, all);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Okänt fel";
       cb.onStageError(id, msg);
@@ -69,33 +96,38 @@ export async function generateProject(
     }
   };
 
-  await run("skeleton", () => callStage({ stage: "skeleton", spec }));
+  await run("contract", () => callStage({ stage: "contract", spec }));
+  await run("skeleton", () => callStage({ stage: "skeleton", spec, contract }));
 
   for (const screen of spec.screens ?? []) {
-    await run(`screen:${screen.id}`, () => callStage({ stage: "screen", spec, screen }));
+    await run(`screen:${screen.id}`, () => callStage({ stage: "screen", spec, screen, contract }));
   }
 
-  await run("data", () => callStage({ stage: "data", spec }));
-  await run("review", () => callStage({ stage: "review", spec, files: all }));
+  await run("data", () => callStage({ stage: "data", spec, contract }));
+  await run("integrate", () => callStage({ stage: "integrate", spec, files: all, contract }));
+  await run("review", () => callStage({ stage: "review", spec, files: all, contract }));
 
-  return all;
+  return { files: all, contract, report };
 }
 
 export async function regenerateFile(
   spec: AppSpec,
   file: GeneratedFile,
   all: GeneratedFile[],
+  contract?: BuildContract | null,
 ): Promise<GeneratedFile[]> {
   const screenMatch = (spec.screens ?? []).find(
     (s) =>
       file.path.includes(`activity_${s.id}.xml`) ||
       file.path.toLowerCase().includes(`${s.name.replace(/\s+/g, "").toLowerCase()}activity`),
   );
-  if (screenMatch) return callStage({ stage: "screen", spec, screen: screenMatch });
-  if (file.path.endsWith(".gradle.kts") || file.path.includes("AndroidManifest") || file.path.includes("res/values")) {
-    return callStage({ stage: "skeleton", spec });
+  if (screenMatch) {
+    return (await callStage({ stage: "screen", spec, screen: screenMatch, contract })).files;
   }
-  return callStage({ stage: "data", spec, files: all });
+  if (file.path.endsWith(".gradle.kts") || file.path.includes("AndroidManifest") || file.path.includes("res/values")) {
+    return (await callStage({ stage: "skeleton", spec, contract })).files;
+  }
+  return (await callStage({ stage: "data", spec, files: all, contract })).files;
 }
 
 export async function downloadProjectZip(
