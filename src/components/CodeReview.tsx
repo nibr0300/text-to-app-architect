@@ -419,6 +419,52 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
               </div>
             )}
 
+            {report.processAudit && (
+              <div className="rounded-lg border border-accent/40 bg-accent/5 p-3 space-y-2">
+                <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                  <Brain className="h-3.5 w-3.5 text-accent" /> Processgranskning — lärdom av tidigare försök
+                </p>
+                {report.processAudit.summary && (
+                  <p className="text-xs text-muted-foreground">{report.processAudit.summary}</p>
+                )}
+                {report.processAudit.systemicFindings.map((item, index) => (
+                  <p key={index} className="text-xs text-muted-foreground">• {item}</p>
+                ))}
+                {report.processAudit.diagnoses.map((diagnosis) => (
+                  <div key={diagnosis.stepId} className="rounded-md bg-surface-code p-2 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded border border-accent/40 bg-accent/10 px-1.5 py-0.5 text-[10px] font-mono uppercase text-accent">
+                        {ROOT_CAUSE_LABEL[diagnosis.rootCause] ?? diagnosis.rootCause}
+                      </span>
+                      <span className="text-xs font-medium text-foreground">{diagnosis.stepTitle || diagnosis.stepId}</span>
+                      <span className="text-[10px] font-mono text-muted-foreground">{diagnosis.attempts} försök</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{diagnosis.analysis}</p>
+                    <p className="text-xs text-foreground/80">Ny metod: {diagnosis.recommendation}</p>
+                    {(diagnosis.suggestedDependencies?.length ?? 0) > 0 && (
+                      <p className="text-[10px] font-mono text-muted-foreground break-all">
+                        Behövs: {diagnosis.suggestedDependencies?.join("  ·  ")}
+                      </p>
+                    )}
+                    {diagnosis.suggestedDirectives?.map((suggestion, index) => (
+                      <Button
+                        key={index}
+                        size="sm"
+                        variant="outline"
+                        className="h-6 gap-1.5 text-[10px]"
+                        disabled={directives.includes(suggestion)}
+                        onClick={() => setDirectives((current) => [...current, suggestion].slice(-20))}
+                      >
+                        <MessageSquare className="h-3 w-3" />
+                        {directives.includes(suggestion) ? "Tillagd riktlinje" : `Lägg till riktlinje: ${suggestion}`}
+                      </Button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+
+
             <div className="rounded-lg border border-accent/40 bg-accent/5 p-3 space-y-2">
               <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
                 <MessageSquare className="h-3.5 w-3.5 text-accent" /> Egna riktlinjer till byggaren
