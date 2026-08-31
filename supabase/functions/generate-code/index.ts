@@ -85,118 +85,135 @@ Only include files you actually changed.`,
 Return ONLY the files you actually changed (full content for each). If nothing needs changing return {"files":[]}.`,
 };
 
-serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+interface HandlerResult {
+  files?: { path: string; content: string }[];
+  contract?: unknown;
+  report?: unknown;
+  error?: string;
+}
 
-  try {
-    const body = await req.json();
-    const { stage, spec, screen, files, contract } = body ?? {};
+async function handleStage(body: Record<string, unknown>): Promise<HandlerResult> {
+  const { stage, spec, screen, files, contract } = (body ?? {}) as {
+    stage?: string;
+    spec?: Record<string, unknown> & { packageName?: string; screens?: { id: string; name: string }[] };
+    screen?: unknown;
+    files?: { path: string; content: string }[];
+    contract?: unknown;
+  };
 
-    if (!stage || !STAGE_PROMPTS[stage]) {
-      return new Response(JSON.stringify({ error: "Invalid stage" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    if (!spec) {
-      return new Response(JSON.stringify({ error: "Spec is required" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+  if (!stage || !STAGE_PROMPTS[stage]) return { error: "Invalid stage" };
+  if (!spec) return { error: "Spec is required" };
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
+  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+  if (!LOVABLE_API_KEY) return { error: "LOVABLE_API_KEY is not configured" };
 
-    const pkg = spec.packageName ?? "com.example.app";
-    const pkgPath = `app/src/main/java/${String(pkg).replace(/\./g, "/")}`;
+  const pkg = spec.packageName ?? "com.example.app";
+  const pkgPath = `app/src/main/java/${String(pkg).replace(/\./g, "/")}`;
 
-    let userContent = `Package: ${pkg}\nJava/Kotlin source root: ${pkgPath}\n\nAPP SPECIFICATION:\n${JSON.stringify(
-      stage === "screen" ? { ...spec, screens: undefined } : spec,
-      null,
-      2,
-    )}`;
+  let userContent = `Package: ${pkg}\nJava/Kotlin source root: ${pkgPath}\n\nAPP SPECIFICATION:\n${JSON.stringify(
+    stage === "screen" ? { ...spec, screens: undefined } : spec,
+    null,
+    2,
+  )}`;
 
-    if (contract && stage !== "contract") {
-      userContent += `\n\nBUILD CONTRACT (binding — obey exactly):\n${JSON.stringify(contract, null, 2)}`;
-    }
+  if (contract && stage !== "contract") {
+    userContent += `\n\nBUILD CONTRACT (binding — obey exactly):\n${JSON.stringify(contract, null, 2)}`;
+  }
 
-    if (stage === "screen") {
-      userContent += `\n\nSCREEN TO GENERATE:\n${JSON.stringify(screen, null, 2)}\n\nAll screen ids for navigation targets: ${(spec.screens ?? [])
-        .map((s: { id: string; name: string }) => `${s.id} (${s.name})`)
-        .join(", ")}`;
-    }
-    if (stage === "review" || stage === "integrate") {
-      const tree = (files ?? []) as { path: string; content: string }[];
-      userContent += `\n\nPROJECT FILES:\n${tree
-        .map((f) => `--- ${f.path} ---\n${f.content}`)
-        .join("\n\n")}`;
-    }
+  if (stage === "screen") {
+    userContent += `\n\nSCREEN TO GENERATE:\n${JSON.stringify(screen, null, 2)}\n\nAll screen ids for navigation targets: ${(spec.screens ?? [])
+      .map((s) => `${s.id} (${s.name})`)
+      .join(", ")}`;
+  }
+  if (stage === "review" || stage === "integrate") {
+    const tree = files ?? [];
+    userContent += `\n\nPROJECT FILES:\n${tree.map((f) => `--- ${f.path} ---\n${f.content}`).join("\n\n")}`;
+  }
 
-    const model =
-      stage === "review" || stage === "integrate" || stage === "contract"
-        ? "openai/gpt-5.5"
-        : "google/gemini-3.7-flash";
+  const model = stage === "contract" || stage === "integrate" ? "openai/gpt-5.5" : "google/gemini-3.7-flash";
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: `${BASE_RULES}\n\nSTAGE INSTRUCTIONS:\n${STAGE_PROMPTS[stage]}` },
-          { role: "user", content: userContent },
-        ],
-        response_format: { type: "json_object" },
-      }),
-    });
+  const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${LOVABLE_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: `${BASE_RULES}\n\nSTAGE INSTRUCTIONS:\n${STAGE_PROMPTS[stage]}` },
+        { role: "user", content: userContent },
+      ],
+      response_format: { type: "json_object" },
+    }),
+  });
 
-    if (!response.ok) {
-      const status = response.status;
-      const text = await response.text();
-      console.error("AI gateway error:", status, text);
-      const message =
+  if (!response.ok) {
+    const status = response.status;
+    const text = await response.text();
+    console.error("AI gateway error:", status, text);
+    return {
+      error:
         status === 429
           ? "Rate limited. Vänta en stund och försök igen."
           : status === 402
             ? "AI-krediter slut. Lägg till krediter i din workspace."
             : status === 403
               ? "AI är blockerat för denna workspace."
-              : "Kodgenereringen misslyckades.";
-      return new Response(JSON.stringify({ error: message }), {
-        status, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const data = await response.json();
-    const raw: string = data.choices?.[0]?.message?.content ?? "{}";
-    let parsed: {
-      files?: { path: string; content: string }[];
-      contract?: unknown;
-      report?: unknown;
+              : "Kodgenereringen misslyckades.",
     };
-    try {
-      parsed = JSON.parse(raw.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, ""));
-    } catch {
-      console.error("Failed to parse model output", raw.slice(0, 500));
-      return new Response(JSON.stringify({ error: "AI:n returnerade ogiltig JSON." }), {
-        status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const outFiles = (parsed.files ?? []).filter(
-      (f) => f && typeof f.path === "string" && typeof f.content === "string",
-    );
-
-    return new Response(
-      JSON.stringify({ files: outFiles, contract: parsed.contract ?? null, report: parsed.report ?? null }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
-  } catch (e) {
-    console.error("generate-code error:", e);
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
   }
+
+  const data = await response.json();
+  const raw: string = data.choices?.[0]?.message?.content ?? "{}";
+  let parsed: HandlerResult;
+  try {
+    parsed = JSON.parse(raw.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, ""));
+  } catch {
+    console.error("Failed to parse model output", raw.slice(0, 500));
+    return { error: "AI:n returnerade ogiltig JSON." };
+  }
+
+  const outFiles = (parsed.files ?? []).filter(
+    (f) => f && typeof f.path === "string" && typeof f.content === "string",
+  );
+
+  return { files: outFiles, contract: parsed.contract ?? null, report: parsed.report ?? null };
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  const body = await req.json().catch(() => ({}));
+
+  // Long stages can exceed the 150s idle timeout, so stream whitespace heartbeats
+  // (ignored by JSON.parse) until the final JSON payload is ready.
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const heartbeat = setInterval(() => {
+        try {
+          controller.enqueue(encoder.encode(" "));
+        } catch {
+          /* stream closed */
+        }
+      }, 10_000);
+
+      let payload: HandlerResult;
+      try {
+        payload = await handleStage(body);
+      } catch (e) {
+        console.error("generate-code error:", e);
+        payload = { error: e instanceof Error ? e.message : "Unknown error" };
+      }
+      clearInterval(heartbeat);
+      controller.enqueue(encoder.encode(JSON.stringify(payload)));
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
 });
+
