@@ -417,6 +417,58 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
               </div>
             )}
 
+            <div className="rounded-lg border border-accent/40 bg-accent/5 p-3 space-y-2">
+              <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                <MessageSquare className="h-3.5 w-3.5 text-accent" /> Egna riktlinjer till byggaren
+              </p>
+              <p className="text-[10px] text-muted-foreground">
+                Skriv instruktioner som överordnar spec, granskning och roadmap — t.ex. ”Ta bort all koppling till Apple Music”. De följer med både reparationer och nästa granskning.
+              </p>
+              <div className="flex gap-2">
+                <input
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      addDirective();
+                    }
+                  }}
+                  placeholder="Ny riktlinje…"
+                  className="flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/60"
+                />
+                <Button size="sm" className="h-8 text-xs" onClick={addDirective} disabled={!draft.trim()}>
+                  Lägg till
+                </Button>
+              </div>
+              {directives.map((item, index) => (
+                <div key={`${item}-${index}`} className="flex items-start gap-2 rounded-md bg-surface-code p-2">
+                  <span className="flex-1 text-xs text-foreground">{item}</span>
+                  <button
+                    type="button"
+                    aria-label="Ta bort riktlinje"
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={() => setDirectives((current) => current.filter((_, i) => i !== index))}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+              {directives.length > 0 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1.5 text-xs"
+                  disabled={fixingStep !== null || files.length === 0}
+                  onClick={() => void handleApplyDirectives()}
+                  >
+                  {fixingStep?.startsWith("directive-") ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageSquare className="h-3.5 w-3.5" />}
+                  Tillämpa riktlinjerna på koden nu
+                </Button>
+              )}
+            </div>
+
+
             {activeSteps.length > 0 && (
               <div className="rounded-lg border border-border p-3 space-y-3">
                 <div>
