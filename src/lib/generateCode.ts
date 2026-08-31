@@ -1,9 +1,10 @@
 import { AppSpec, Screen } from "@/types/appSpec";
 import { BuildContract, GeneratedFile, QualityReport } from "@/types/generatedProject";
+import { LintIssue, lintProject } from "@/lib/lintProject";
 
 const CODE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-code`;
 
-type Stage = "contract" | "skeleton" | "screen" | "data" | "integrate" | "review";
+type Stage = "contract" | "skeleton" | "screen" | "data" | "integrate" | "review" | "repair";
 
 interface StageResponse {
   files: GeneratedFile[];
@@ -17,7 +18,9 @@ async function callStage(payload: {
   screen?: Screen;
   files?: GeneratedFile[];
   contract?: BuildContract | null;
+  issues?: LintIssue[];
 }): Promise<StageResponse> {
+
   const resp = await fetch(CODE_URL, {
     method: "POST",
     headers: {
@@ -69,8 +72,10 @@ export function planStages(spec: AppSpec) {
     { id: "data", label: "Datamodeller & nätverkslager" },
     { id: "integrate", label: "Integrationsgranskning (död kod, placebo-logik, säkerhet)" },
     { id: "review", label: "Kompileringsgranskning & korrigering" },
+    { id: "repair", label: "Statisk analys & reparation (syntax, BLE, Play Services, meny)" },
   ];
 }
+
 
 export interface GenerateProjectResult {
   files: GeneratedFile[];
@@ -92,8 +97,14 @@ export async function generateProject(
       const res = await fn();
       if (res.contract) contract = res.contract;
       if (res.report) {
-        report = res.report;
-        cb.onReport?.(res.report);
+        report = {
+          checks: [...(report?.checks ?? []), ...(res.report.checks ?? [])],
+          manualFollowUps: [
+            ...(report?.manualFollowUps ?? []),
+            ...(res.report.manualFollowUps ?? []),
+          ],
+        };
+        cb.onReport?.(report);
       }
       all = merge(all, res.files);
       cb.onStageDone(id, res.files, all);
@@ -115,8 +126,50 @@ export async function generateProject(
   await run("integrate", () => callStage({ stage: "integrate", spec, files: all, contract }));
   await run("review", () => callStage({ stage: "review", spec, files: all, contract }));
 
+  // Deterministic static analysis: only what the analyzer flags is sent back to the model.
+  await run("repair", async () => {
+    let issues = lintProject(all);
+    let last: StageResponse = { files: [], contract: null, report: null };
+
+    for (let attempt = 0; attempt < 2 && issues.length > 0; attempt++) {
+      const affected = new Set(issues.map((i) => i.path));
+      const res = await callStage({
+        stage: "repair",
+        spec,
+        contract,
+        issues,
+        files: all.filter((f) => affected.has(f.path)),
+      });
+      all = merge(all, res.files);
+      last = res;
+      issues = lintProject(all);
+    }
+
+    const checks = [...(last.report?.checks ?? [])];
+    if (issues.length === 0) {
+      checks.push({
+        id: "staticAnalysis",
+        label: "Statisk analys",
+        status: "ok",
+        detail: "Inga syntaxfel, oskyddade Play Services-anrop, ofiltrerade BLE-scan eller ej inflaterade menyer kvar.",
+      });
+    } else {
+      for (const issue of issues) {
+        checks.push({
+          id: issue.rule,
+          label: `${issue.path.split("/").pop()} — ${issue.rule}`,
+          status: "warning",
+          detail: issue.message,
+        });
+      }
+    }
+
+    return { files: [], contract: null, report: { ...last.report, checks } };
+  });
+
   return { files: all, contract, report };
 }
+
 
 export async function regenerateFile(
   spec: AppSpec,

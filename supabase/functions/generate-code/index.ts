@@ -26,11 +26,18 @@ HARD QUALITY RULES (a violation makes the output unacceptable):
 4. SINGLE SOURCE OF TRUTH FOR SETTINGS. All reads/writes of user settings go through the generated PreferencesStore. No Activity may touch SharedPreferences directly.
 5. LANGUAGE CONSISTENCY. Derive one UI language from the spec (its description/screen names). TTS Locale, all user-visible strings, strings.xml and spoken announcements must all use that same language. Never mix a Swedish TTS locale with English strings.
 6. RELEASE SAFETY. HttpLoggingInterceptor may only be added when BuildConfig.DEBUG is true, at Level.BODY in debug and NONE otherwise. Release build type: isMinifyEnabled = true with working proguard-rules.pro. Never hardcode API keys — read them from local.properties via buildConfigField and reference BuildConfig.
-7. FULL NAVIGATION. Every generated Activity must be reachable from at least one other screen through a real Intent (settings screens get a visible button or toolbar menu item). No orphan Activities.
+7. FULL NAVIGATION. Every generated Activity must be reachable from at least one other screen through a real Intent. If navigation goes through a Toolbar menu, you MUST also generate res/menu/<name>.xml AND inflate it (onCreateOptionsMenu or toolbar.inflateMenu / app:menu in the layout) — a setOnMenuItemClickListener without an inflated menu is a bug.
 8. NO DEAD CODE. Every generated data class, service, repository and helper must be referenced somewhere in the app.
+9. DEFENSIVE PLATFORM CALLS. Google Play Services APIs (FusedLocationProviderClient, ML Kit via GMS) must be guarded with GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context) and degrade gracefully with a user-visible message instead of crashing. BLE scanning must use ScanFilter with the relevant service UUID (e.g. 0x180D for heart rate) — never connect to the first device found. Every network call needs an error path shown in the UI.
+10. NO SYNTHETIC STAND-INS FOR REAL MEDIA. Never generate audio by writing WAV headers/sine tones, never fabricate images or data. Audio playback must come from a real source: the device's own media session (MediaController/AudioManager), a user-picked file (ActivityResultContracts.OpenDocument / MediaStore), or a bundled res/raw resource the README tells the developer to supply.
+11. AUTH FLOWS MUST BE REAL. Third-party APIs that need OAuth (Spotify etc.) require the actual authorization + token-refresh flow, not a hardcoded Bearer token. If a provider appears in the UI (a spinner option, a button) it must be implemented — otherwise do not offer it.
+12. AVOID PAID/RESTRICTED APIs unless the spec demands them. If one is unavoidable (Google Roads Speed Limits), implement a documented fallback path and list the required billing activation in manualFollowUps and the README.
+13. LANGUAGE FIDELITY. The UI language is the language the user wrote the spec in. Never silently switch the whole app to English. TTS locale, SpeechRecognizer language, strings.xml and all announcements use that one language.
+14. COMPILABLE OUTPUT. Balanced braces/parens, no stray tokens, no truncated files, no TODO/FIXME. Re-read each file before returning it.
 
 OUTPUT FORMAT (strict): return ONLY a JSON object, no markdown fences:
 {"files":[{"path":"relative/path/from/project/root","content":"full file content"}]}`;
+
 
 const STAGE_PROMPTS: Record<string, string> = {
   contract: `Do NOT generate any files in this stage. Produce the BUILD CONTRACT that every later stage must obey.
@@ -83,6 +90,18 @@ Return ONLY this JSON shape:
 Only include files you actually changed.`,
   review: `You receive the complete generated project file tree. Fix ONLY real correctness problems: missing/incorrect imports, references to classes or ids that do not exist, activities missing from the manifest, layout ids not matching ViewBinding usage, missing Gradle dependencies for used libraries, and Kotlin syntax errors.
 Return ONLY the files you actually changed (full content for each). If nothing needs changing return {"files":[]}.`,
+  repair: `A deterministic static analyzer found concrete defects in specific files. You receive those files and the exact issue list.
+
+For EVERY listed issue, return the complete corrected file:
+- unbalancedBrackets / strayToken / placeholder: repair the syntax so the file compiles. Remove corruption artifacts (stray identifiers after a closing brace), never delete working logic.
+- bleScanFilter: add ScanFilter with the relevant service UUID (heart rate = 0000180D-0000-1000-8000-00805f9b34fb) and ScanSettings, and only connect to a matching device.
+- playServicesCheck: guard with GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context) and surface a user-visible fallback instead of crashing.
+- toolbarMenu: also return res/menu/<name>.xml and inflate it properly so the menu item exists.
+- syntheticAudio: replace tone synthesis with a real media source (MediaController/AudioManager over the user's own player, a user-picked track, or res/raw the README asks the developer to supply).
+- paidApi / staticOAuthToken: add a real fallback path or the actual OAuth token-refresh flow.
+
+Return ONLY: {"files":[{"path":"...","content":"full corrected file"}],"report":{"checks":[{"id":"rule id","label":"short label in the contract's uiLanguage","status":"ok|fixed|warning","detail":"one sentence"}],"manualFollowUps":["..."]}}`,
+
 };
 
 interface HandlerResult {
@@ -93,13 +112,15 @@ interface HandlerResult {
 }
 
 async function handleStage(body: Record<string, unknown>): Promise<HandlerResult> {
-  const { stage, spec, screen, files, contract } = (body ?? {}) as {
+  const { stage, spec, screen, files, contract, issues } = (body ?? {}) as {
     stage?: string;
     spec?: Record<string, unknown> & { packageName?: string; screens?: { id: string; name: string }[] };
     screen?: unknown;
     files?: { path: string; content: string }[];
     contract?: unknown;
+    issues?: { path: string; rule: string; message: string; severity?: string }[];
   };
+
 
   if (!stage || !STAGE_PROMPTS[stage]) return { error: "Invalid stage" };
   if (!spec) return { error: "Spec is required" };
@@ -125,12 +146,21 @@ async function handleStage(body: Record<string, unknown>): Promise<HandlerResult
       .map((s) => `${s.id} (${s.name})`)
       .join(", ")}`;
   }
-  if (stage === "review" || stage === "integrate") {
+  if (stage === "review" || stage === "integrate" || stage === "repair") {
     const tree = files ?? [];
     userContent += `\n\nPROJECT FILES:\n${tree.map((f) => `--- ${f.path} ---\n${f.content}`).join("\n\n")}`;
   }
+  if (stage === "repair") {
+    userContent += `\n\nSTATIC ANALYSIS ISSUES (fix every one):\n${(issues ?? [])
+      .map((i) => `- [${i.severity ?? "error"}] ${i.path} (${i.rule}): ${i.message}`)
+      .join("\n")}`;
+  }
 
-  const model = stage === "contract" || stage === "integrate" ? "openai/gpt-5.5" : "google/gemini-3.7-flash";
+  const model =
+    stage === "contract" || stage === "integrate" || stage === "repair"
+      ? "openai/gpt-5.5"
+      : "google/gemini-3.7-flash";
+
 
   const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
