@@ -21,6 +21,27 @@ export interface ReviewRoadmapStep {
   dependsOn: string[];
   acceptanceCriteria: string[];
   status?: "pending" | "applied" | "verified" | "blocked";
+  attempts?: RoadmapRepairAttempt[];
+}
+
+export type RepairFailureCategory = "transient" | "regression" | "invalid-response" | "blocked" | "generation";
+
+export interface RepairBlocker {
+  kind: "credential" | "external-service" | "product-decision" | "binary-asset" | "integration-test" | "other";
+  detail: string;
+  requiredAction: string;
+}
+
+export interface RoadmapRepairAttempt {
+  id: string;
+  at: string;
+  projectFingerprint: string;
+  outcome: "applied" | "blocked" | "failed";
+  strategySummary?: string;
+  differenceFromPrevious?: string;
+  category?: RepairFailureCategory;
+  reason?: string;
+  blockers?: RepairBlocker[];
 }
 
 export interface ReviewDelta {
@@ -39,6 +60,11 @@ export interface RoadmapRepairResult {
   manualFollowUps: string[];
   lintBefore: number;
   lintAfter: number;
+  status: "applied" | "blocked";
+  strategySummary: string;
+  differenceFromPrevious: string;
+  blockers: RepairBlocker[];
+  attempt: RoadmapRepairAttempt;
 }
 
 export interface ReviewSection {

@@ -3,7 +3,7 @@ import { AppSpec } from "@/types/appSpec";
 import { GeneratedFile } from "@/types/generatedProject";
 import { BuildContract } from "@/types/generatedProject";
 import { ReviewFinding, ReviewReport, ReviewRoadmapStep, ReviewSection, ReviewStage, RoadmapRepairResult } from "@/types/review";
-import { planReviewStages, repairRoadmapStep, reviewCodebase } from "@/lib/reviewCodebase";
+import { planReviewStages, repairRoadmapStep, reviewCodebase, RoadmapRepairError } from "@/lib/reviewCodebase";
 import { ZipUpload } from "@/components/ZipUpload";
 import { FileTreeViewer } from "@/components/FileTreeViewer";
 import { Button } from "@/components/ui/button";
@@ -158,21 +158,41 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
       try {
         const contract = useUpload ? null : loadJson<BuildContract>(CONTRACT_KEY);
         const result = await repairRoadmapStep(useUpload ? null : spec, report, step, files, contract);
-        if (useUpload) setUploaded(result.files);
-        else onFilesChange?.(result.files);
+        if (result.changedPaths.length) {
+          if (useUpload) setUploaded(result.files);
+          else onFilesChange?.(result.files);
+        }
         setLastRepair(result);
         setReport((current) => current ? {
           ...current,
-          roadmap: current.roadmap.map((item) => item.id === step.id ? { ...item, status: "applied" } : item),
+          roadmap: current.roadmap.map((item) => item.id === step.id ? {
+            ...item,
+            status: result.status,
+            attempts: [...(item.attempts ?? []), result.attempt],
+          } : item),
         } : current);
         toast({
-          title: "Roadmap-etappen tillämpad",
-          description: `${result.changedPaths.length} samverkande fil(er) uppdaterades utan statisk regression. Kör en ny helhetsgranskning för verifiering.`,
+          title: result.status === "blocked" ? "Etappen har en extern blockerare" : "Roadmap-etappen tillämpad",
+          description: result.status === "blocked"
+            ? "Säkra kodändringar sparades och blockeraren dokumenterades. Nästa etapp kan nu bedömas utan att denna markeras som verifierad."
+            : `${result.changedPaths.length} samverkande fil(er) uppdaterades utan statisk regression. Kör en ny helhetsgranskning för verifiering.`,
         });
       } catch (e) {
+        const message = e instanceof Error ? e.message : "Okänt fel";
+        if (e instanceof RoadmapRepairError && e.attempt.category !== "transient") {
+          setReport((current) => current ? {
+            ...current,
+            roadmap: current.roadmap.map((item) => item.id === step.id ? {
+              ...item,
+              attempts: [...(item.attempts ?? []), e.attempt],
+            } : item),
+          } : current);
+        }
         toast({
           title: "Kunde inte åtgärda",
-          description: e instanceof Error ? e.message : "Okänt fel",
+          description: e instanceof RoadmapRepairError && e.attempt.category !== "transient"
+            ? `${message} Nästa försök får denna återkoppling och måste använda en annan strategi.`
+            : `${message} Detta ser tillfälligt ut och räknas inte som en misslyckad lösningsstrategi.`,
           variant: "destructive",
         });
       } finally {
@@ -342,7 +362,7 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
                 </div>
                 {report.roadmap.map((step) => {
                   const dependenciesReady = step.dependsOn.every((id) =>
-                    report.roadmap.some((candidate) => candidate.id === id && (candidate.status === "applied" || candidate.status === "verified")),
+                    report.roadmap.some((candidate) => candidate.id === id && (candidate.status === "applied" || candidate.status === "verified" || candidate.status === "blocked")),
                   );
                   return (
                     <div key={step.id} className="border-l-2 border-primary/30 pl-3 space-y-1.5">
@@ -357,15 +377,27 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
                       {step.acceptanceCriteria.map((criterion, index) => (
                         <p key={index} className="text-[10px] text-muted-foreground">✓ {criterion}</p>
                       ))}
+                      {(step.attempts?.length ?? 0) > 0 && (
+                        <div className="rounded-md border border-border bg-surface-code p-2 space-y-1">
+                          <p className="text-[10px] font-mono text-muted-foreground">
+                            {step.attempts?.length} tidigare försök · identiska strategier spärras
+                          </p>
+                          {step.attempts?.slice(-2).map((attempt) => (
+                            <p key={attempt.id} className="text-[10px] text-muted-foreground">
+                              {attempt.outcome === "failed" ? "Avvisad" : attempt.outcome === "blocked" ? "Blockerad" : "Tillämpad"}: {attempt.strategySummary ?? attempt.reason ?? "Tekniskt fel före strategival"}
+                            </p>
+                          ))}
+                        </div>
+                      )}
                       <Button
                         size="sm"
                         variant={step.status === "applied" ? "outline" : "default"}
                         className="h-7 gap-1.5 text-xs"
-                        disabled={!dependenciesReady || fixingStep !== null || step.status === "applied"}
+                        disabled={!dependenciesReady || fixingStep !== null || step.status === "applied" || step.status === "blocked"}
                         onClick={() => void handleRepairStep(step)}
                       >
                         {fixingStep === step.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Route className="h-3.5 w-3.5" />}
-                        {step.status === "applied" ? "Tillämpad — inväntar ny granskning" : dependenciesReady ? "Åtgärda denna etapp" : "Inväntar föregående etapp"}
+                        {step.status === "applied" ? "Tillämpad — inväntar ny granskning" : step.status === "blocked" ? "Blockerad dokumenterad — fortsätt" : dependenciesReady ? (step.attempts?.length ? "Försök med annan strategi" : "Åtgärda denna etapp") : "Inväntar föregående etapp"}
                       </Button>
                     </div>
                   );
@@ -377,6 +409,9 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
               <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-1">
                 <p className="text-xs font-medium text-foreground">Senaste reparationsbatch</p>
                 <p className="text-xs text-muted-foreground">{lastRepair.changedPaths.length} filer ändrade · statiska avvikelser {lastRepair.lintBefore} → {lastRepair.lintAfter}</p>
+                <p className="text-xs text-muted-foreground">Strategi: {lastRepair.strategySummary}</p>
+                {lastRepair.differenceFromPrevious && <p className="text-xs text-muted-foreground">Skillnad: {lastRepair.differenceFromPrevious}</p>}
+                {lastRepair.blockers.map((blocker, index) => <p key={index} className="text-xs text-accent">Blockerare: {blocker.detail} — {blocker.requiredAction}</p>)}
                 {lastRepair.manualFollowUps.map((item, index) => <p key={index} className="text-xs text-accent">Manuellt: {item}</p>)}
               </div>
             )}

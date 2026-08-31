@@ -111,10 +111,12 @@ Rules:
 3. Never introduce a class, resource, id, dependency, permission, method or constructor without updating every required declaration and caller in the same batch.
 4. Never replace real implementation with placeholders, TODOs, simulated data or deleted functionality.
 5. Re-read the resulting project as a whole before returning it. Ensure imports, package names, signatures, resources, manifest and Gradle remain mutually consistent.
-6. If the stage cannot be completed without credentials, commercial APIs, missing product decisions or binary assets, make all safe code changes and list the exact blocker under manualFollowUps instead of inventing a stand-in.
+6. If the stage cannot be completed without credentials, commercial APIs, missing product decisions, binary assets or a live integration environment, make all safe code changes and return status "blocked" with structured blockers instead of inventing a stand-in.
+7. You may receive PREVIOUS FAILED ATTEMPTS. Never repeat their strategy on an unchanged project. Choose a materially different architecture and state the difference. If no materially different safe strategy exists, return status "blocked"; do not resubmit equivalent edits.
+8. A server/proxy integration that does not yet exist cannot be proven by Android-only code. Define the production client contract and honest disabled/error UI, then block only the credential, deployment or live integration-test work that truly requires external action.
 
 Return ONLY this JSON shape:
-{"files":[{"path":"relative project path","content":"complete corrected file"}],"repair":{"addressedFindingIds":["finding id"],"changedPaths":["path"],"manualFollowUps":["blocker or manual action"]}}`,
+{"files":[{"path":"relative project path","content":"complete corrected file"}],"repair":{"status":"applied|blocked","strategySummary":"specific architecture and procedure used","differenceFromPrevious":"material difference from prior attempts, or first attempt","addressedFindingIds":["finding id"],"changedPaths":["path"],"manualFollowUps":["manual action"],"blockers":[{"kind":"credential|external-service|product-decision|binary-asset|integration-test|other","detail":"what cannot be completed in this codebase","requiredAction":"specific action that changes the prerequisites"}]}}`,
 
 };
 
@@ -127,7 +129,7 @@ interface HandlerResult {
 }
 
 async function handleStage(body: Record<string, unknown>): Promise<HandlerResult> {
-  const { stage, spec, screen, files, contract, issues, reviewReport, roadmapStep } = (body ?? {}) as {
+  const { stage, spec, screen, files, contract, issues, reviewReport, roadmapStep, previousAttempts } = (body ?? {}) as {
     stage?: string;
     spec?: Record<string, unknown> & { packageName?: string; screens?: { id: string; name: string }[] };
     screen?: unknown;
@@ -136,6 +138,7 @@ async function handleStage(body: Record<string, unknown>): Promise<HandlerResult
     issues?: { path: string; rule: string; message: string; severity?: string }[];
     reviewReport?: unknown;
     roadmapStep?: unknown;
+    previousAttempts?: unknown[];
   };
 
 
@@ -179,6 +182,11 @@ async function handleStage(body: Record<string, unknown>): Promise<HandlerResult
     if (!roadmapStep || !reviewReport || !(files?.length)) return { error: "Roadmap, granskningsrapport och projektfiler krävs." };
     userContent += `\n\nCOMPLETE AUDIT REPORT:\n${JSON.stringify(reviewReport, null, 2)}`;
     userContent += `\n\nSELECTED ROADMAP STAGE (execute atomically):\n${JSON.stringify(roadmapStep, null, 2)}`;
+    if (previousAttempts?.length) {
+      userContent += `\n\nPREVIOUS FAILED ATTEMPTS ON THIS UNCHANGED PROJECT (negative constraints — do not repeat):\n${JSON.stringify(previousAttempts, null, 2)}`;
+    } else {
+      userContent += "\n\nPREVIOUS FAILED ATTEMPTS: none. This is the first strategy for these project contents.";
+    }
   }
 
   const model =

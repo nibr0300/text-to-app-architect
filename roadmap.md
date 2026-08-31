@@ -6,7 +6,7 @@
 - [x] Visa progression mellan granskningar
 - [x] Verifiera AI-anrop och tester
 - [x] Verifiera preview och aktuell buildstatus
-- [ ] Spara reparationsförsök och negativ feedback per roadmap-etapp
-- [ ] Förbjud identiska omförsök utan ändrade förutsättningar
-- [ ] Stöd blockerade etapper och alternativ strategi i UI
+- [x] Spara reparationsförsök och negativ feedback per roadmap-etapp
+- [x] Förbjud identiska omförsök utan ändrade förutsättningar
+- [x] Stöd blockerade etapper och alternativ strategi i UI
 - [ ] Verifiera loopskydd, tillfälliga fel och regressionsavvisning
