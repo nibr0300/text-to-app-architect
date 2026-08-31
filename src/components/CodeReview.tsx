@@ -11,9 +11,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import {
   AlertTriangle,
+  Ban,
   Check,
   Info,
   Loader2,
+  MessageSquare,
   ScanSearch,
   Sparkles,
   Route,
@@ -32,6 +34,7 @@ const REPORT_KEY = "nlp-programmer:last-review";
 const HISTORY_KEY = "nlp-programmer:review-history";
 const UPLOAD_KEY = "nlp-programmer:review-upload";
 const CONTRACT_KEY = "nlp-programmer:last-contract";
+const DIRECTIVES_KEY = "nlp-programmer:review-directives";
 
 function loadJson<T>(key: string): T | null {
   try {
@@ -76,7 +79,18 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
   const [history, setHistory] = useState<ReviewReport[]>(() => loadJson<ReviewReport[]>(HISTORY_KEY) ?? []);
   const [fixingStep, setFixingStep] = useState<string | null>(null);
   const [lastRepair, setLastRepair] = useState<RoadmapRepairResult | null>(null);
+  const [directives, setDirectives] = useState<string[]>(() => loadJson<string[]>(DIRECTIVES_KEY) ?? []);
+  const [draft, setDraft] = useState("");
   const { toast } = useToast();
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(DIRECTIVES_KEY, JSON.stringify(directives));
+    } catch {
+      // ignore
+    }
+  }, [directives]);
+
 
   useEffect(() => {
     try {
@@ -114,6 +128,15 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
     return map;
   }, [report]);
 
+  const parkedSteps = useMemo(
+    () => (report?.roadmap ?? []).filter((step) => step.status === "blocked" || step.status === "dismissed"),
+    [report],
+  );
+  const activeSteps = useMemo(
+    () => (report?.roadmap ?? []).filter((step) => step.status !== "blocked" && step.status !== "dismissed"),
+    [report],
+  );
+
   const handleRun = useCallback(async () => {
     if (!files.length) {
       toast({ title: "Ingen kodbas att granska", variant: "destructive" });
@@ -132,7 +155,13 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
         onStageStart: (id) => update(id, { status: "running" }),
         onStageDone: (id) => update(id, { status: "done" }),
         onStageError: (id, error) => update(id, { status: "error", error }),
-      }, previous);
+      }, previous, {
+        directives,
+        excluded: parkedSteps.map((step) => ({
+          title: step.title,
+          reason: step.status === "dismissed" ? "avfärdad av användaren" : "blockerad av externt hinder",
+        })),
+      });
       setReport(result);
       setHistory((current) => [...current.filter((item) => item.generatedAt !== result.generatedAt), result].slice(-5));
       toast({
@@ -148,7 +177,7 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
     } finally {
       setIsRunning(false);
     }
-  }, [files, spec, source, useUpload, toast, report]);
+  }, [files, spec, source, useUpload, toast, report, directives, parkedSteps]);
 
   const handleRepairStep = useCallback(
     async (step: ReviewRoadmapStep) => {
@@ -157,7 +186,7 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
       setLastRepair(null);
       try {
         const contract = useUpload ? null : loadJson<BuildContract>(CONTRACT_KEY);
-        const result = await repairRoadmapStep(useUpload ? null : spec, report, step, files, contract);
+        const result = await repairRoadmapStep(useUpload ? null : spec, report, step, files, contract, directives);
         if (result.changedPaths.length) {
           if (useUpload) setUploaded(result.files);
           else onFilesChange?.(result.files);
@@ -174,33 +203,71 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
         toast({
           title: result.status === "blocked" ? "Etappen har en extern blockerare" : "Roadmap-etappen tillämpad",
           description: result.status === "blocked"
-            ? "Säkra kodändringar sparades och blockeraren dokumenterades. Nästa etapp kan nu bedömas utan att denna markeras som verifierad."
+            ? "Säkra kodändringar sparades och etappen flyttas ned till parkerade punkter, så att nya åtgärder får plats."
             : `${result.changedPaths.length} samverkande fil(er) uppdaterades utan statisk regression. Kör en ny helhetsgranskning för verifiering.`,
         });
       } catch (e) {
         const message = e instanceof Error ? e.message : "Okänt fel";
-        if (e instanceof RoadmapRepairError && e.attempt.category !== "transient") {
+        const attempt = e instanceof RoadmapRepairError ? e.attempt : null;
+        if (attempt) {
           setReport((current) => current ? {
             ...current,
             roadmap: current.roadmap.map((item) => item.id === step.id ? {
               ...item,
-              attempts: [...(item.attempts ?? []), e.attempt],
+              attempts: [...(item.attempts ?? []), attempt],
             } : item),
           } : current);
         }
+        const isFirstTransient = attempt?.category === "transient";
         toast({
           title: "Kunde inte åtgärda",
-          description: e instanceof RoadmapRepairError && e.attempt.category !== "transient"
-            ? `${message} Nästa försök får denna återkoppling och måste använda en annan strategi.`
-            : `${message} Detta ser tillfälligt ut och räknas inte som en misslyckad lösningsstrategi.`,
+          description: isFirstTransient
+            ? `${message} Första gången detta ser ut som ett tillfälligt fel — upprepas det räknas det som en misslyckad strategi och nästa försök tvingas byta väg.`
+            : `${message} Försöket är sparat som misslyckat: nästa försök måste använda en annan strategi, annars avfärda eller styr om etappen med en riktlinje.`,
           variant: "destructive",
         });
       } finally {
         setFixingStep(null);
       }
     },
-    [files, spec, useUpload, onFilesChange, toast, report],
+    [files, spec, useUpload, onFilesChange, toast, report, directives],
   );
+
+  const handleDismissStep = useCallback((stepId: string) => {
+    setReport((current) => current ? {
+      ...current,
+      roadmap: current.roadmap.map((item) => item.id === stepId ? { ...item, status: "dismissed" as const } : item),
+    } : current);
+    toast({
+      title: "Etappen avfärdad",
+      description: "Punkten flyttas ned bland parkerade och tas inte upp igen vid nästa granskning.",
+    });
+  }, [toast]);
+
+  const handleApplyDirectives = useCallback(async () => {
+    if (!report || !directives.length) return;
+    await handleRepairStep({
+      id: `directive-${Date.now()}`,
+      order: 0,
+      title: "Användarriktlinjer",
+      objective: `Genomför användarens riktlinjer i hela kodbasen: ${directives.join(" | ")}`,
+      rationale: "Riktlinjerna överordnar spec och tidigare rekommendationer.",
+      findingIds: [],
+      paths: [],
+      dependsOn: [],
+      acceptanceCriteria: directives.map((item) => `Riktlinjen är helt genomförd: ${item}`),
+      status: "pending",
+      attempts: [],
+    });
+  }, [report, directives, handleRepairStep]);
+
+  const addDirective = useCallback(() => {
+    const value = draft.trim();
+    if (!value) return;
+    setDirectives((current) => [...current, value].slice(-20));
+    setDraft("");
+  }, [draft]);
+
 
   const renderSection = (section: ReviewSection) => {
     const sorted = [...section.findings].sort(
@@ -352,17 +419,69 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
               </div>
             )}
 
-            {report.roadmap?.length > 0 && (
+            <div className="rounded-lg border border-accent/40 bg-accent/5 p-3 space-y-2">
+              <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                <MessageSquare className="h-3.5 w-3.5 text-accent" /> Egna riktlinjer till byggaren
+              </p>
+              <p className="text-[10px] text-muted-foreground">
+                Skriv instruktioner som överordnar spec, granskning och roadmap — t.ex. ”Ta bort all koppling till Apple Music”. De följer med både reparationer och nästa granskning.
+              </p>
+              <div className="flex gap-2">
+                <input
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      addDirective();
+                    }
+                  }}
+                  placeholder="Ny riktlinje…"
+                  className="flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/60"
+                />
+                <Button size="sm" className="h-8 text-xs" onClick={addDirective} disabled={!draft.trim()}>
+                  Lägg till
+                </Button>
+              </div>
+              {directives.map((item, index) => (
+                <div key={`${item}-${index}`} className="flex items-start gap-2 rounded-md bg-surface-code p-2">
+                  <span className="flex-1 text-xs text-foreground">{item}</span>
+                  <button
+                    type="button"
+                    aria-label="Ta bort riktlinje"
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={() => setDirectives((current) => current.filter((_, i) => i !== index))}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+              {directives.length > 0 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1.5 text-xs"
+                  disabled={fixingStep !== null || files.length === 0}
+                  onClick={() => void handleApplyDirectives()}
+                  >
+                  {fixingStep?.startsWith("directive-") ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageSquare className="h-3.5 w-3.5" />}
+                  Tillämpa riktlinjerna på koden nu
+                </Button>
+              )}
+            </div>
+
+
+            {activeSteps.length > 0 && (
               <div className="rounded-lg border border-border p-3 space-y-3">
                 <div>
                   <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
                     <Route className="h-3.5 w-3.5 text-primary" /> Roadmap till byggbar app
                   </p>
-                  <p className="text-[10px] text-muted-foreground mt-1">Varje etapp repareras atomiskt med hela projektet och hela granskningsrapporten som kontext.</p>
+                  <p className="text-[10px] text-muted-foreground mt-1">Varje etapp repareras atomiskt med hela projektet som kontext. Blockerade och avfärdade punkter flyttas längst ned och tar ingen plats i listan.</p>
                 </div>
-                {report.roadmap.map((step) => {
+                {activeSteps.map((step) => {
                   const dependenciesReady = step.dependsOn.every((id) =>
-                    report.roadmap.some((candidate) => candidate.id === id && (candidate.status === "applied" || candidate.status === "verified" || candidate.status === "blocked")),
+                    report.roadmap.some((candidate) => candidate.id === id && candidate.status && candidate.status !== "pending"),
                   );
                   return (
                     <div key={step.id} className="border-l-2 border-primary/30 pl-3 space-y-1.5">
@@ -389,21 +508,33 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
                           ))}
                         </div>
                       )}
-                      <Button
-                        size="sm"
-                        variant={step.status === "applied" ? "outline" : "default"}
-                        className="h-7 gap-1.5 text-xs"
-                        disabled={!dependenciesReady || fixingStep !== null || step.status === "applied" || step.status === "blocked"}
-                        onClick={() => void handleRepairStep(step)}
-                      >
-                        {fixingStep === step.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Route className="h-3.5 w-3.5" />}
-                        {step.status === "applied" ? "Tillämpad — inväntar ny granskning" : step.status === "blocked" ? "Blockerad dokumenterad — fortsätt" : dependenciesReady ? (step.attempts?.length ? "Försök med annan strategi" : "Åtgärda denna etapp") : "Inväntar föregående etapp"}
-                      </Button>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant={step.status === "applied" ? "outline" : "default"}
+                          className="h-7 gap-1.5 text-xs"
+                          disabled={!dependenciesReady || fixingStep !== null || step.status === "applied"}
+                          onClick={() => void handleRepairStep(step)}
+                        >
+                          {fixingStep === step.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Route className="h-3.5 w-3.5" />}
+                          {step.status === "applied" ? "Tillämpad — inväntar ny granskning" : dependenciesReady ? (step.attempts?.length ? "Försök med annan strategi" : "Åtgärda denna etapp") : "Inväntar föregående etapp"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 gap-1.5 text-xs text-muted-foreground"
+                          disabled={fixingStep !== null}
+                          onClick={() => handleDismissStep(step.id)}
+                        >
+                          <Ban className="h-3.5 w-3.5" /> Avfärda
+                        </Button>
+                      </div>
                     </div>
                   );
                 })}
               </div>
             )}
+
 
             {lastRepair && (
               <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-1">
@@ -443,6 +574,44 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
                 ))}
               </div>
             )}
+
+            {parkedSteps.length > 0 && (
+              <div className="rounded-lg border border-border/60 bg-muted/30 p-3 space-y-2">
+                <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                  <Ban className="h-3.5 w-3.5" /> Parkerade punkter ({parkedSteps.length})
+                </p>
+                <p className="text-[10px] text-muted-foreground">
+                  Blockerade eller avfärdade etapper. De upptar ingen plats i roadmapen och återskapas inte vid nästa granskning.
+                </p>
+                {parkedSteps.map((step) => (
+                  <div key={step.id} className="rounded-md bg-surface-code p-2 space-y-1">
+                    <p className="text-xs text-foreground">
+                      {step.status === "dismissed" ? "Avfärdad" : "Blockerad"}: {step.title}
+                    </p>
+                    {step.attempts?.slice(-1).map((attempt) => (
+                      <p key={attempt.id} className="text-[10px] text-muted-foreground">
+                        {attempt.blockers?.[0]?.requiredAction ?? attempt.reason ?? attempt.strategySummary ?? ""}
+                      </p>
+                    ))}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 text-[10px] text-muted-foreground"
+                      disabled={fixingStep !== null}
+                      onClick={() =>
+                        setReport((current) => current ? {
+                          ...current,
+                          roadmap: current.roadmap.map((item) => item.id === step.id ? { ...item, status: "pending" as const } : item),
+                        } : current)
+                      }
+                    >
+                      Återaktivera
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+
 
             <p className="text-[10px] text-muted-foreground flex items-center gap-1.5">
               <Info className="h-3 w-3" />

@@ -20,7 +20,7 @@ export interface ReviewRoadmapStep {
   paths: string[];
   dependsOn: string[];
   acceptanceCriteria: string[];
-  status?: "pending" | "applied" | "verified" | "blocked";
+  status?: "pending" | "applied" | "verified" | "blocked" | "dismissed";
   attempts?: RoadmapRepairAttempt[];
 }
 
@@ -85,6 +85,7 @@ export interface ReviewReport {
   generatedAt: string;
   source: "generated" | "upload";
   fileCount: number;
+  directives?: string[];
 }
 
 export type ReviewStageStatus = "pending" | "running" | "done" | "error";

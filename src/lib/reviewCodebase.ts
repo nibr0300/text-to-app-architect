@@ -37,6 +37,8 @@ interface StageBody {
   files?: GeneratedFile[];
   sections?: ReviewSection[];
   lint?: LintIssue[];
+  directives?: string[];
+  excluded?: { title: string; reason: string }[];
 }
 
 function stableHash(value: string): string {
@@ -143,14 +145,22 @@ export interface ReviewCallbacks {
   onStageError: (id: string, error: string) => void;
 }
 
+export interface ReviewOptions {
+  directives?: string[];
+  excluded?: { title: string; reason: string }[];
+}
+
 export async function reviewCodebase(
   files: GeneratedFile[],
   spec: AppSpec | null,
   source: "generated" | "upload",
   cb: ReviewCallbacks,
   previous: ReviewReport | null = null,
+  options: ReviewOptions = {},
 ): Promise<ReviewReport> {
   const sections: ReviewSection[] = [];
+  const directives = (options.directives ?? []).filter((item) => item.trim().length > 0);
+  const excluded = options.excluded ?? [];
 
   cb.onStageStart("lint");
   const issues = lintProject(files);
@@ -162,7 +172,7 @@ export async function reviewCodebase(
     const id = `area:${area.id}`;
     cb.onStageStart(id);
     try {
-      const res = await call({ stage: "audit", area: area.id, spec, files });
+      const res = await call({ stage: "audit", area: area.id, spec, files, directives });
       const section = res.section as ReviewSection | undefined;
       if (section) {
         const stableSection = stabilizeSection(section);
@@ -187,7 +197,7 @@ export async function reviewCodebase(
     roadmap: [] as ReviewRoadmapStep[],
   };
   try {
-    const res = await call({ stage: "verdict", sections, lint: issues });
+    const res = await call({ stage: "verdict", sections, lint: issues, directives, excluded });
     verdict = { ...verdict, ...(res.verdict as typeof verdict) };
     cb.onStageDone("verdict");
   } catch (e) {
@@ -202,6 +212,7 @@ export async function reviewCodebase(
     generatedAt: new Date().toISOString(),
     source,
     fileCount: files.length,
+    directives,
   };
   report.delta = compareReports(report, previous);
   return report;
@@ -282,13 +293,18 @@ export async function repairRoadmapStep(
   step: ReviewRoadmapStep,
   files: GeneratedFile[],
   contract: BuildContract | null = null,
+  directives: string[] = [],
 ): Promise<RoadmapRepairResult> {
   if (!files.length) throw new Error("Hittade inga projektfiler att reparera.");
   const lintBefore = lintProject(files);
   const fingerprint = projectFingerprint(files);
-  const previousAttempts = (step.attempts ?? []).filter((attempt) =>
-    attempt.projectFingerprint === fingerprint && attempt.category !== "transient"
-  );
+  const attemptsOnThisCode = (step.attempts ?? []).filter((attempt) => attempt.projectFingerprint === fingerprint);
+  const transientCount = attemptsOnThisCode.filter((attempt) => attempt.category === "transient").length;
+  // A failure that keeps recurring on unchanged code is not transient, no matter how it is reported.
+  const classify = (base: RepairFailureCategory): RepairFailureCategory =>
+    base === "transient" && transientCount >= 1 ? "generation" : base;
+  const previousAttempts = attemptsOnThisCode.filter((attempt) => classify(attempt.category ?? "generation") !== "transient");
+  const activeDirectives = directives.filter((item) => item.trim().length > 0);
 
   const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-code`, {
     method: "POST",
@@ -304,13 +320,14 @@ export async function repairRoadmapStep(
       reviewReport: report,
       roadmapStep: step,
       previousAttempts,
+      directives: activeDirectives,
     }),
   });
 
   if (!resp.ok) {
     const data = await resp.json().catch(() => ({ error: `Error ${resp.status}` }));
     const message = (data as { error?: string }).error || `Error ${resp.status}`;
-    const category: RepairFailureCategory = resp.status === 429 || resp.status >= 500 ? "transient" : "generation";
+    const category = classify(resp.status === 429 || resp.status >= 500 ? "transient" : "generation");
     throw new RoadmapRepairError(message, createFailedAttempt(fingerprint, category, message));
   }
   const text = await resp.text();
@@ -322,7 +339,7 @@ export async function repairRoadmapStep(
     throw new RoadmapRepairError(message, createFailedAttempt(fingerprint, "invalid-response", message));
   }
   if (data.error) {
-    const category = /Rate limited|tillfäll|Kodgenereringen misslyckades/i.test(data.error) ? "transient" : "generation";
+    const category = classify(/Rate limited|tillfäll|Kodgenereringen misslyckades/i.test(data.error) ? "transient" : "generation");
     throw new RoadmapRepairError(data.error, createFailedAttempt(fingerprint, category, data.error));
   }
   const strategySummary = data.repair?.strategySummary?.trim() ?? "";

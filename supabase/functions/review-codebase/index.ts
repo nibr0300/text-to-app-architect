@@ -164,14 +164,24 @@ function sanitizeRoadmap(value: unknown, validFindingIds: Set<string>) {
   }));
 }
 
+function directiveBlock(directives: unknown): string {
+  const list = stringList(directives, 20).map((item) => item.slice(0, 600));
+  if (!list.length) return "";
+  return `\n\nUSER DIRECTIVES (binding — they override the original spec and any earlier recommendation):\n${list
+    .map((item, index) => `${index + 1}. ${item}`)
+    .join("\n")}\nA feature the user asked to remove must NOT be reported as a missing feature; instead report any remaining traces of it as findings to delete.`;
+}
+
 async function handle(body: Record<string, unknown>): Promise<HandlerResult> {
-  const { stage, area, spec, files, sections, lint } = (body ?? {}) as {
+  const { stage, area, spec, files, sections, lint, directives, excluded } = (body ?? {}) as {
     stage?: string;
     area?: string;
     spec?: unknown;
     files?: { path: string; content: string }[];
     sections?: unknown;
     lint?: unknown;
+    directives?: unknown;
+    excluded?: { title?: string; reason?: string }[];
   };
 
   if (stage === "audit") {
@@ -183,6 +193,7 @@ async function handle(body: Record<string, unknown>): Promise<HandlerResult> {
     let user = `PROJECT FILE INDEX:\n${files.map((f) => f.path).join("\n")}\n\n`;
     if (spec) user += `APP SPECIFICATION (what was promised):\n${JSON.stringify(spec, null, 2)}\n\n`;
     user += `PROJECT SOURCE:\n${tree}`;
+    user += directiveBlock(directives);
 
     const model = area === "security" || area === "buildability" ? "openai/gpt-5.5" : "google/gemini-3.7-flash";
     const parsed = await callModel(
@@ -210,7 +221,16 @@ async function handle(body: Record<string, unknown>): Promise<HandlerResult> {
   }
 
   if (stage === "verdict") {
-    const user = `AUDIT SECTIONS:\n${JSON.stringify(sections ?? [], null, 2)}\n\nSTATIC ANALYSIS:\n${JSON.stringify(lint ?? [], null, 2)}`;
+    let user = `AUDIT SECTIONS:\n${JSON.stringify(sections ?? [], null, 2)}\n\nSTATIC ANALYSIS:\n${JSON.stringify(lint ?? [], null, 2)}`;
+    user += directiveBlock(directives);
+    const parked = (Array.isArray(excluded) ? excluded : [])
+      .filter((item) => typeof item?.title === "string")
+      .slice(0, 30);
+    if (parked.length) {
+      user += `\n\nPARKED STAGES (already blocked or dismissed by the user — do NOT recreate them; use the freed roadmap slots for work that can actually move the build forward):\n${parked
+        .map((item) => `- ${item.title}: ${item.reason ?? "parkerad"}`)
+        .join("\n")}`;
+    }
     const parsed = await callModel("openai/gpt-5.5", `${BASE}\n\n${VERDICT_PROMPT}`, user);
     const pct = Number(parsed.completeness);
     const sectionList = Array.isArray(sections) ? sections as { findings?: { id?: unknown }[] }[] : [];

@@ -114,6 +114,8 @@ Rules:
 6. If the stage cannot be completed without credentials, commercial APIs, missing product decisions, binary assets or a live integration environment, make all safe code changes and return status "blocked" with structured blockers instead of inventing a stand-in.
 7. You may receive PREVIOUS FAILED ATTEMPTS. Never repeat their strategy on an unchanged project. Choose a materially different architecture and state the difference. If no materially different safe strategy exists, return status "blocked"; do not resubmit equivalent edits.
 8. A server/proxy integration that does not yet exist cannot be proven by Android-only code. Define the production client contract and honest disabled/error UI, then block only the credential, deployment or live integration-test work that truly requires external action.
+9. USER DIRECTIVES OUTRANK EVERYTHING. When the user directs that a capability be removed, removing it completely IS the correct fix — never keep it, never block on it, never report it as a missing feature.
+
 
 Return ONLY this JSON shape:
 {"files":[{"path":"relative project path","content":"complete corrected file"}],"repair":{"status":"applied|blocked","strategySummary":"specific architecture and procedure used","differenceFromPrevious":"material difference from prior attempts, or first attempt","addressedFindingIds":["finding id"],"changedPaths":["path"],"manualFollowUps":["manual action"],"blockers":[{"kind":"credential|external-service|product-decision|binary-asset|integration-test|other","detail":"what cannot be completed in this codebase","requiredAction":"specific action that changes the prerequisites"}]}}`,
@@ -129,7 +131,7 @@ interface HandlerResult {
 }
 
 async function handleStage(body: Record<string, unknown>): Promise<HandlerResult> {
-  const { stage, spec, screen, files, contract, issues, reviewReport, roadmapStep, previousAttempts } = (body ?? {}) as {
+  const { stage, spec, screen, files, contract, issues, reviewReport, roadmapStep, previousAttempts, directives } = (body ?? {}) as {
     stage?: string;
     spec?: Record<string, unknown> & { packageName?: string; screens?: { id: string; name: string }[] };
     screen?: unknown;
@@ -139,6 +141,7 @@ async function handleStage(body: Record<string, unknown>): Promise<HandlerResult
     reviewReport?: unknown;
     roadmapStep?: unknown;
     previousAttempts?: unknown[];
+    directives?: unknown;
   };
 
 
@@ -182,6 +185,15 @@ async function handleStage(body: Record<string, unknown>): Promise<HandlerResult
     if (!roadmapStep || !reviewReport || !(files?.length)) return { error: "Roadmap, granskningsrapport och projektfiler krävs." };
     userContent += `\n\nCOMPLETE AUDIT REPORT:\n${JSON.stringify(reviewReport, null, 2)}`;
     userContent += `\n\nSELECTED ROADMAP STAGE (execute atomically):\n${JSON.stringify(roadmapStep, null, 2)}`;
+    const directiveList = (Array.isArray(directives) ? directives : [])
+      .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      .slice(0, 20)
+      .map((item) => item.slice(0, 600));
+    if (directiveList.length) {
+      userContent += `\n\nUSER DIRECTIVES (BINDING — they override the spec, the audit report and the roadmap stage). If a directive removes a capability, delete its code, dependencies, permissions, resources, strings and UI entry points completely and rewire the remaining callers in the same batch. Never reintroduce it and never report it as a blocker:\n${directiveList
+        .map((item, index) => `${index + 1}. ${item}`)
+        .join("\n")}`;
+    }
     if (previousAttempts?.length) {
       userContent += `\n\nPREVIOUS FAILED ATTEMPTS ON THIS UNCHANGED PROJECT (negative constraints — do not repeat):\n${JSON.stringify(previousAttempts, null, 2)}`;
     } else {
