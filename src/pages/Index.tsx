@@ -164,6 +164,13 @@ const Index = () => {
             <SpecViewer spec={spec} rawJson={rawJson} />
           </section>
         )}
+
+        {spec && (
+          <section>
+            <CodeGenerator spec={spec} files={files} onFilesChange={setFiles} />
+          </section>
+        )}
+
       </main>
 
       {/* Footer */}
