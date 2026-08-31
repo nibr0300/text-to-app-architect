@@ -221,7 +221,16 @@ async function handle(body: Record<string, unknown>): Promise<HandlerResult> {
   }
 
   if (stage === "verdict") {
-    const user = `AUDIT SECTIONS:\n${JSON.stringify(sections ?? [], null, 2)}\n\nSTATIC ANALYSIS:\n${JSON.stringify(lint ?? [], null, 2)}`;
+    let user = `AUDIT SECTIONS:\n${JSON.stringify(sections ?? [], null, 2)}\n\nSTATIC ANALYSIS:\n${JSON.stringify(lint ?? [], null, 2)}`;
+    user += directiveBlock(directives);
+    const parked = (Array.isArray(excluded) ? excluded : [])
+      .filter((item) => typeof item?.title === "string")
+      .slice(0, 30);
+    if (parked.length) {
+      user += `\n\nPARKED STAGES (already blocked or dismissed by the user — do NOT recreate them; use the freed roadmap slots for work that can actually move the build forward):\n${parked
+        .map((item) => `- ${item.title}: ${item.reason ?? "parkerad"}`)
+        .join("\n")}`;
+    }
     const parsed = await callModel("openai/gpt-5.5", `${BASE}\n\n${VERDICT_PROMPT}`, user);
     const pct = Number(parsed.completeness);
     const sectionList = Array.isArray(sections) ? sections as { findings?: { id?: unknown }[] }[] : [];
