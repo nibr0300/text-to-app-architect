@@ -54,6 +54,18 @@ const SEVERITY_LABEL: Record<ReviewFinding["severity"], string> = {
 
 const SEVERITY_ORDER: ReviewFinding["severity"][] = ["critical", "major", "minor", "info"];
 
+const ROOT_CAUSE_LABEL: Record<string, string> = {
+  "stage-too-large": "För stor etapp",
+  "missing-library": "Saknat bibliotek",
+  "missing-external-tool": "Saknat verktyg",
+  "wrong-method": "Fel metod",
+  "missing-information": "Saknad information",
+  "unrealistic-acceptance-criteria": "Orimliga kriterier",
+  "external-blocker": "Externt hinder",
+  "model-limitation": "Modellbegränsning",
+};
+
+
 function SeverityBadge({ severity }: { severity: ReviewFinding["severity"] }) {
   return (
     <span
