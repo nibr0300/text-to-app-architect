@@ -196,6 +196,20 @@ export async function reviewCodebase(
     }
   }
 
+  const priorRoadmap = previous?.roadmap ?? [];
+  let processAudit: ProcessAudit | null = null;
+  if (hasRepairExperience(priorRoadmap)) {
+    cb.onStageStart("process");
+    try {
+      const res = await call({ stage: "process", roadmap: priorRoadmap, lint: issues, files, directives });
+      processAudit = (res.processAudit as ProcessAudit | undefined) ?? null;
+      cb.onStageDone("process");
+    } catch (e) {
+      // A failed process audit must never block the substantive review.
+      cb.onStageError("process", e instanceof Error ? e.message : "Okänt fel");
+    }
+  }
+
   cb.onStageStart("verdict");
   let verdict = {
     completeness: 0,
@@ -205,7 +219,7 @@ export async function reviewCodebase(
     roadmap: [] as ReviewRoadmapStep[],
   };
   try {
-    const res = await call({ stage: "verdict", sections, lint: issues, directives, excluded });
+    const res = await call({ stage: "verdict", sections, lint: issues, directives, excluded, processAudit });
     verdict = { ...verdict, ...(res.verdict as typeof verdict) };
     cb.onStageDone("verdict");
   } catch (e) {
@@ -216,6 +230,8 @@ export async function reviewCodebase(
 
   const report: ReviewReport = {
     ...verdict,
+    roadmap: carryOverAttempts(verdict.roadmap, priorRoadmap),
+    processAudit: processAudit ?? undefined,
     sections,
     generatedAt: new Date().toISOString(),
     source,
@@ -223,6 +239,7 @@ export async function reviewCodebase(
     directives,
   };
   report.delta = compareReports(report, previous);
+
   return report;
 }
 
