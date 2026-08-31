@@ -10,32 +10,77 @@ const BASE_RULES = `You are a senior Android engineer. You generate production-q
 Global conventions (ALWAYS follow):
 - Kotlin, minSdk 24, targetSdk 34, AGP 8.x, Gradle Kotlin DSL (build.gradle.kts).
 - ViewBinding for all layouts (no findViewById, no Compose).
-- Retrofit 2 + Gson + OkHttp logging for network, coroutines (lifecycleScope) for async work.
+- Retrofit 2 + Gson + OkHttp for network, coroutines (lifecycleScope) for async work.
 - Every screen id maps to: res/layout/activity_<screen_id>.xml and an Activity class named from the screen name in PascalCase + "Activity".
 - Accessibility first: large text sizes, contentDescription on every non-text view, high contrast, TalkBack friendly.
-- Text-to-Speech, when used, must init with Locale("sv", "SE") and fall back to Locale.getDefault() if unavailable.
-- Network calls need explicit timeouts (10s) and user-visible error handling; a local/self-hosted server (e.g. Ollama) must degrade gracefully with a clear offline message instead of crashing.
 - No TODOs, no placeholder comments — write complete, compilable code.
+
+HARD QUALITY RULES (a violation makes the output unacceptable):
+1. NO PLACEBO LOGIC. Every feature in the spec must be implemented against a real platform or network API. Never simulate data with hardcoded lists, random values, timers pretending to be sensors, or a Toast/label where a real call belongs. If a value comes from the device, read it from the device.
+2. NO UNUSED DEPENDENCIES. A Gradle dependency may only be declared if generated Kotlin code actually imports and uses it. Conversely, every capability implied by the spec must have its dependency declared.
+3. MODERN PLATFORM APIs, explicitly:
+   - Location: com.google.android.gms.location.FusedLocationProviderClient with LocationRequest/LocationCallback — never LocationManager.
+   - Camera / vision (face detection, barcode scanning, OCR): CameraX Preview + ImageAnalysis feeding an ML Kit detector — never a stub switch.
+   - Audio/music control: AudioManager, MediaSession/MediaController (androidx.media3.session) or PlaybackParams on the player — an app that changes tempo/pitch must actually act on audio playback.
+   - Permissions: registerForActivityResult(ActivityResultContracts.RequestPermission(s)) — never onRequestPermissionsResult.
+4. SINGLE SOURCE OF TRUTH FOR SETTINGS. All reads/writes of user settings go through the generated PreferencesStore. No Activity may touch SharedPreferences directly.
+5. LANGUAGE CONSISTENCY. Derive one UI language from the spec (its description/screen names). TTS Locale, all user-visible strings, strings.xml and spoken announcements must all use that same language. Never mix a Swedish TTS locale with English strings.
+6. RELEASE SAFETY. HttpLoggingInterceptor may only be added when BuildConfig.DEBUG is true, at Level.BODY in debug and NONE otherwise. Release build type: isMinifyEnabled = true with working proguard-rules.pro. Never hardcode API keys — read them from local.properties via buildConfigField and reference BuildConfig.
+7. FULL NAVIGATION. Every generated Activity must be reachable from at least one other screen through a real Intent (settings screens get a visible button or toolbar menu item). No orphan Activities.
+8. NO DEAD CODE. Every generated data class, service, repository and helper must be referenced somewhere in the app.
 
 OUTPUT FORMAT (strict): return ONLY a JSON object, no markdown fences:
 {"files":[{"path":"relative/path/from/project/root","content":"full file content"}]}`;
 
 const STAGE_PROMPTS: Record<string, string> = {
+  contract: `Do NOT generate any files in this stage. Produce the BUILD CONTRACT that every later stage must obey.
+
+Return ONLY this JSON shape (no "files" key):
+{"contract":{
+  "uiLanguage":"BCP47 tag derived from the spec, e.g. sv-SE",
+  "classes":[{"fqcn":"pkg.layer.Name","kind":"activity|data|service|repository|store|util","responsibility":"one line","publicApi":["fun name(args): ReturnType"]}],
+  "featureOwners":[{"feature":"from spec features","ownerClass":"fqcn","implementation":"the concrete real API used, e.g. CameraX ImageAnalysis + ML Kit FaceDetection"}],
+  "libraries":[{"gradle":"group:artifact","usedBy":["fqcn"],"why":"one line"}],
+  "screenWiring":[{"screenId":"id","activity":"fqcn","calls":["Repository.method()"],"navigatesTo":["fqcn"],"reachableFrom":["fqcn or LAUNCHER"]}],
+  "settingsAccess":"pkg.data.PreferencesStore",
+  "notes":["decisions later stages must follow"]
+}}
+
+Rules: no library without a usedBy entry; every feature in the spec needs a featureOwner with a REAL implementation (never "simulated"); every screen must appear in reachableFrom of some other screen or be the LAUNCHER; every API in the spec must be called by at least one screen.`,
   skeleton: `Generate the project skeleton ONLY:
-- settings.gradle.kts, build.gradle.kts (root), app/build.gradle.kts (viewBinding on, all needed dependencies derived from the spec: Retrofit, Gson, OkHttp, CameraX + ML Kit barcode if camera/scanning is implied, coroutines, Material3), gradle.properties, app/proguard-rules.pro, .gitignore
+- settings.gradle.kts, build.gradle.kts (root), app/build.gradle.kts (viewBinding + buildConfig on, exactly the dependencies listed in the contract's libraries array, debug/release build types per the release-safety rule, API keys via local.properties + buildConfigField), gradle.properties, app/proguard-rules.pro, .gitignore, README.md explaining required local.properties keys
 - app/src/main/AndroidManifest.xml registering EVERY screen as an activity (launcher screen gets the LAUNCHER intent-filter) and declaring all permissions from the spec
-- app/src/main/res/values/colors.xml, strings.xml, themes.xml (Material3 dark theme using the spec theme colors)
+- app/src/main/res/values/colors.xml, strings.xml (in the contract's uiLanguage), themes.xml (Material3 dark theme using the spec theme colors)
 Do NOT generate activities, layouts, models or network code in this stage.`,
   screen: `Generate EXACTLY two files for the single screen given below:
 - app/src/main/res/layout/activity_<screen_id>.xml using the screen's layout root and all its components (ids from the spec, properties applied: text, hint, textSize, backgroundColor, inputType, style)
 - app/src/main/java/<package path>/<Name>Activity.kt using ViewBinding, wiring every component event from the spec, and performing navigation with explicit Intents to the target activities.
-Reference data/network classes by their expected names (data classes in package .data, Retrofit services in .network, repositories in .repository) — do not define them here.`,
-  data: `Generate the data and network layer ONLY:
+You MUST implement the contract's screenWiring entry for this screen: call every listed repository method for real (lifecycleScope + Result handling + user-visible error state), navigate to every listed target, and implement any feature this screen owns with the real API named in featureOwners. Read/write settings only via PreferencesStore. All user-visible strings in the contract's uiLanguage, from strings.xml.
+Reference data/network classes by their contract names — do not define them here.`,
+  data: `Generate the data and network layer ONLY, exactly matching the contract's class list and public API signatures:
 - one Kotlin data class file per data model in package <pkg>.data
-- a PreferencesStore (SharedPreferences wrapper) in <pkg>.data for any model that represents user settings/preferences
-- one Retrofit service interface per API in <pkg>.network (with the spec's endpoints), plus an ApiClient object building Retrofit instances with the spec base URLs and 10s timeouts
-- one Repository class per API in <pkg>.repository exposing suspend functions that wrap the service and return Result<T> with error handling.
+- a PreferencesStore (SharedPreferences wrapper) in <pkg>.data covering every user setting in the spec — this is the ONLY place SharedPreferences is touched
+- one Retrofit service interface per API in <pkg>.network (with the spec's endpoints), plus an ApiClient object building Retrofit instances with the spec base URLs, 10s timeouts, keys from BuildConfig, and logging only under BuildConfig.DEBUG
+- one Repository class per API in <pkg>.repository exposing suspend functions that wrap the service and return Result<T> with error handling
+- any device-capability helper the contract assigns (location provider wrapper, ML Kit analyzer, audio/tempo controller) implemented with the real platform API.
 Do NOT generate activities or layouts in this stage.`,
+  integrate: `You receive the complete generated project plus the build contract. Audit the project against this checklist and RETURN CORRECTED FILES for every problem you find.
+
+Checklist:
+1. Unused Gradle dependencies (declared but never imported) — remove them, or implement the feature they belong to if the contract requires it.
+2. Declared-but-never-called repositories, services, data classes, helpers — wire them into the owning screen per the contract, or delete them.
+3. Placebo/simulated logic (hardcoded value lists, fake sensor loops, features that only change a label) — replace with the real API from featureOwners.
+4. Direct SharedPreferences usage outside PreferencesStore — route through PreferencesStore.
+5. Orphan Activities not reachable from any other screen — add a real navigation entry point.
+6. Language conflicts between TTS locale, strings.xml and inline strings — unify on the contract's uiLanguage and move inline strings to strings.xml.
+7. HttpLoggingInterceptor active in release, isMinifyEnabled = false, or hardcoded API keys — fix per the release-safety rule.
+8. Legacy APIs (LocationManager, onRequestPermissionsResult) — replace with the modern equivalents.
+
+Return ONLY this JSON shape:
+{"files":[{"path":"...","content":"full corrected file"}],
+ "report":{"checks":[{"id":"unusedDependencies|deadCode|placeboLogic|settingsSource|navigation|language|releaseSafety|legacyApis","label":"short label in the contract's uiLanguage","status":"ok|fixed|warning","detail":"one sentence"}],
+ "manualFollowUps":["things the developer must still do, e.g. supply an API key"]}}
+Only include files you actually changed.`,
   review: `You receive the complete generated project file tree. Fix ONLY real correctness problems: missing/incorrect imports, references to classes or ids that do not exist, activities missing from the manifest, layout ids not matching ViewBinding usage, missing Gradle dependencies for used libraries, and Kotlin syntax errors.
 Return ONLY the files you actually changed (full content for each). If nothing needs changing return {"files":[]}.`,
 };
@@ -45,7 +90,7 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { stage, spec, screen, files } = body ?? {};
+    const { stage, spec, screen, files, contract } = body ?? {};
 
     if (!stage || !STAGE_PROMPTS[stage]) {
       return new Response(JSON.stringify({ error: "Invalid stage" }), {
@@ -70,19 +115,26 @@ serve(async (req) => {
       2,
     )}`;
 
+    if (contract && stage !== "contract") {
+      userContent += `\n\nBUILD CONTRACT (binding — obey exactly):\n${JSON.stringify(contract, null, 2)}`;
+    }
+
     if (stage === "screen") {
       userContent += `\n\nSCREEN TO GENERATE:\n${JSON.stringify(screen, null, 2)}\n\nAll screen ids for navigation targets: ${(spec.screens ?? [])
         .map((s: { id: string; name: string }) => `${s.id} (${s.name})`)
         .join(", ")}`;
     }
-    if (stage === "review") {
+    if (stage === "review" || stage === "integrate") {
       const tree = (files ?? []) as { path: string; content: string }[];
       userContent += `\n\nPROJECT FILES:\n${tree
         .map((f) => `--- ${f.path} ---\n${f.content}`)
         .join("\n\n")}`;
     }
 
-    const model = stage === "review" ? "openai/gpt-5.5" : "google/gemini-3.7-flash";
+    const model =
+      stage === "review" || stage === "integrate" || stage === "contract"
+        ? "openai/gpt-5.5"
+        : "google/gemini-3.7-flash";
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -119,7 +171,11 @@ serve(async (req) => {
 
     const data = await response.json();
     const raw: string = data.choices?.[0]?.message?.content ?? "{}";
-    let parsed: { files?: { path: string; content: string }[] };
+    let parsed: {
+      files?: { path: string; content: string }[];
+      contract?: unknown;
+      report?: unknown;
+    };
     try {
       parsed = JSON.parse(raw.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, ""));
     } catch {
@@ -133,9 +189,10 @@ serve(async (req) => {
       (f) => f && typeof f.path === "string" && typeof f.content === "string",
     );
 
-    return new Response(JSON.stringify({ files: outFiles }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ files: outFiles, contract: parsed.contract ?? null, report: parsed.report ?? null }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
   } catch (e) {
     console.error("generate-code error:", e);
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
