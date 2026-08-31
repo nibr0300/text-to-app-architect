@@ -183,6 +183,15 @@ async function handleStage(body: Record<string, unknown>): Promise<HandlerResult
     if (!roadmapStep || !reviewReport || !(files?.length)) return { error: "Roadmap, granskningsrapport och projektfiler krävs." };
     userContent += `\n\nCOMPLETE AUDIT REPORT:\n${JSON.stringify(reviewReport, null, 2)}`;
     userContent += `\n\nSELECTED ROADMAP STAGE (execute atomically):\n${JSON.stringify(roadmapStep, null, 2)}`;
+    const directiveList = (Array.isArray(directives) ? directives : [])
+      .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      .slice(0, 20)
+      .map((item) => item.slice(0, 600));
+    if (directiveList.length) {
+      userContent += `\n\nUSER DIRECTIVES (BINDING — they override the spec, the audit report and the roadmap stage). If a directive removes a capability, delete its code, dependencies, permissions, resources, strings and UI entry points completely and rewire the remaining callers in the same batch. Never reintroduce it and never report it as a blocker:\n${directiveList
+        .map((item, index) => `${index + 1}. ${item}`)
+        .join("\n")}`;
+    }
     if (previousAttempts?.length) {
       userContent += `\n\nPREVIOUS FAILED ATTEMPTS ON THIS UNCHANGED PROJECT (negative constraints — do not repeat):\n${JSON.stringify(previousAttempts, null, 2)}`;
     } else {
