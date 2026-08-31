@@ -32,6 +32,7 @@ const REPORT_KEY = "nlp-programmer:last-review";
 const HISTORY_KEY = "nlp-programmer:review-history";
 const UPLOAD_KEY = "nlp-programmer:review-upload";
 const CONTRACT_KEY = "nlp-programmer:last-contract";
+const DIRECTIVES_KEY = "nlp-programmer:review-directives";
 
 function loadJson<T>(key: string): T | null {
   try {
