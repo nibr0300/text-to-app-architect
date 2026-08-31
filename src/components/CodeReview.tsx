@@ -521,6 +521,44 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
               </div>
             )}
 
+            {parkedSteps.length > 0 && (
+              <div className="rounded-lg border border-border/60 bg-muted/30 p-3 space-y-2">
+                <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                  <Ban className="h-3.5 w-3.5" /> Parkerade punkter ({parkedSteps.length})
+                </p>
+                <p className="text-[10px] text-muted-foreground">
+                  Blockerade eller avfärdade etapper. De upptar ingen plats i roadmapen och återskapas inte vid nästa granskning.
+                </p>
+                {parkedSteps.map((step) => (
+                  <div key={step.id} className="rounded-md bg-surface-code p-2 space-y-1">
+                    <p className="text-xs text-foreground">
+                      {step.status === "dismissed" ? "Avfärdad" : "Blockerad"}: {step.title}
+                    </p>
+                    {step.attempts?.slice(-1).map((attempt) => (
+                      <p key={attempt.id} className="text-[10px] text-muted-foreground">
+                        {attempt.blockers?.[0]?.requiredAction ?? attempt.reason ?? attempt.strategySummary ?? ""}
+                      </p>
+                    ))}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 text-[10px] text-muted-foreground"
+                      disabled={fixingStep !== null}
+                      onClick={() =>
+                        setReport((current) => current ? {
+                          ...current,
+                          roadmap: current.roadmap.map((item) => item.id === step.id ? { ...item, status: "pending" as const } : item),
+                        } : current)
+                      }
+                    >
+                      Återaktivera
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+
             <p className="text-[10px] text-muted-foreground flex items-center gap-1.5">
               <Info className="h-3 w-3" />
               Granskad {new Date(report.generatedAt).toLocaleString("sv-SE")}
