@@ -1,6 +1,11 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppSpec } from "@/types/appSpec";
-import { GeneratedFile, GenStage } from "@/types/generatedProject";
+import {
+  BuildContract,
+  GeneratedFile,
+  GenStage,
+  QualityReport,
+} from "@/types/generatedProject";
 import {
   downloadProjectZip,
   generateProject,
@@ -11,12 +16,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import {
+  AlertTriangle,
   Check,
   Copy,
   Download,
   Hammer,
   Loader2,
   RefreshCw,
+  ShieldCheck,
+  Wrench,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -28,13 +36,49 @@ interface CodeGeneratorProps {
   onFilesChange: (files: GeneratedFile[]) => void;
 }
 
+const REPORT_KEY = "nlp-programmer:last-report";
+const CONTRACT_KEY = "nlp-programmer:last-contract";
+
+function loadJson<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function CodeGenerator({ spec, files, onFilesChange }: CodeGeneratorProps) {
   const [stages, setStages] = useState<GenStage[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [regenerating, setRegenerating] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [report, setReport] = useState<QualityReport | null>(() =>
+    loadJson<QualityReport>(REPORT_KEY),
+  );
+  const [contract, setContract] = useState<BuildContract | null>(() =>
+    loadJson<BuildContract>(CONTRACT_KEY),
+  );
   const { toast } = useToast();
+
+  useEffect(() => {
+    try {
+      if (report) localStorage.setItem(REPORT_KEY, JSON.stringify(report));
+      else localStorage.removeItem(REPORT_KEY);
+    } catch {
+      // ignore
+    }
+  }, [report]);
+
+  useEffect(() => {
+    try {
+      if (contract) localStorage.setItem(CONTRACT_KEY, JSON.stringify(contract));
+      else localStorage.removeItem(CONTRACT_KEY);
+    } catch {
+      // ignore
+    }
+  }, [contract]);
 
   const selectedFile = useMemo(
     () => files.find((f) => f.path === selected) ?? files[0] ?? null,
@@ -46,22 +90,30 @@ export function CodeGenerator({ spec, files, onFilesChange }: CodeGeneratorProps
     const planned = planStages(spec).map<GenStage>((s) => ({ ...s, status: "pending" }));
     setStages(planned);
     onFilesChange([]);
+    setReport(null);
+    setContract(null);
 
     const update = (id: string, patch: Partial<GenStage>) =>
       setStages((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
 
     try {
-      const all = await generateProject(spec, {
+      const result = await generateProject(spec, {
         onStageStart: (id) => update(id, { status: "running" }),
         onStageDone: (id, _files, allFiles) => {
           update(id, { status: "done" });
           onFilesChange([...allFiles]);
         },
         onStageError: (id, error) => update(id, { status: "error", error }),
+        onReport: (r) => setReport(r),
       });
-      onFilesChange(all);
-      setSelected(all[0]?.path ?? null);
-      toast({ title: "Android-projekt klart", description: `${all.length} filer genererade.` });
+      onFilesChange(result.files);
+      setContract(result.contract);
+      if (result.report) setReport(result.report);
+      setSelected(result.files[0]?.path ?? null);
+      toast({
+        title: "Android-projekt klart",
+        description: `${result.files.length} filer genererade.`,
+      });
     } catch (e) {
       toast({
         title: "Kodgenerering avbröts",
@@ -84,7 +136,7 @@ export function CodeGenerator({ spec, files, onFilesChange }: CodeGeneratorProps
     if (!selectedFile) return;
     setRegenerating(true);
     try {
-      const updated = await regenerateFile(spec, selectedFile, files);
+      const updated = await regenerateFile(spec, selectedFile, files, contract);
       const map = new Map(files.map((f) => [f.path, f]));
       for (const f of updated) map.set(f.path, f);
       onFilesChange(Array.from(map.values()).sort((a, b) => a.path.localeCompare(b.path)));
@@ -98,7 +150,7 @@ export function CodeGenerator({ spec, files, onFilesChange }: CodeGeneratorProps
     } finally {
       setRegenerating(false);
     }
-  }, [selectedFile, spec, files, onFilesChange, toast]);
+  }, [selectedFile, spec, files, contract, onFilesChange, toast]);
 
   const handleDownload = useCallback(async () => {
     try {
@@ -193,6 +245,44 @@ export function CodeGenerator({ spec, files, onFilesChange }: CodeGeneratorProps
                 {selectedFile?.content}
               </pre>
             </div>
+          </div>
+        )}
+
+        {report && report.checks?.length > 0 && (
+          <div className="rounded-lg border border-border p-3 space-y-2">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <ShieldCheck className="h-4 w-4 text-primary" />
+              Kvalitetsutlåtande
+            </div>
+            <div className="space-y-1.5">
+              {report.checks.map((check) => (
+                <div key={check.id} className="flex items-start gap-2 text-xs">
+                  {check.status === "ok" && <Check className="h-3.5 w-3.5 mt-0.5 shrink-0 text-primary" />}
+                  {check.status === "fixed" && (
+                    <Wrench className="h-3.5 w-3.5 mt-0.5 shrink-0 text-accent" />
+                  )}
+                  {check.status === "warning" && (
+                    <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0 text-destructive" />
+                  )}
+                  <span className="min-w-0">
+                    <span className="text-foreground">{check.label}</span>
+                    {check.detail && (
+                      <span className="block text-muted-foreground">{check.detail}</span>
+                    )}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {report.manualFollowUps && report.manualFollowUps.length > 0 && (
+              <div className="pt-2 border-t border-border space-y-1">
+                <p className="text-xs font-medium text-foreground">Kvar att göra manuellt</p>
+                {report.manualFollowUps.map((item, i) => (
+                  <p key={i} className="text-xs text-muted-foreground">
+                    • {item}
+                  </p>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </CardContent>
