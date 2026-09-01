@@ -177,6 +177,13 @@ const Index = () => {
           <CodeReview spec={spec} generatedFiles={files} onFilesChange={setFiles} />
         </section>
 
+        {files.length > 0 && (
+          <section>
+            <ApkBuilder appName={spec?.appName || "android-app"} files={files} />
+          </section>
+        )}
+
+
 
       </main>
 
