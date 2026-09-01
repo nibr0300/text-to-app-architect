@@ -88,10 +88,24 @@ serve(async (req) => {
       `${base}/actions/workflows/build.yml/runs?event=workflow_dispatch&per_page=40`,
       { headers: ghHeaders(token) },
     );
+    if (runsRes.status === 404) {
+      // Either the repo is unreachable (wrong owner/repo/token) or no build has been pushed yet.
+      const repoRes = await fetch(base, { headers: ghHeaders(token) });
+      if (!repoRes.ok) {
+        return json(
+          {
+            error: `Kommer inte åt repot ${owner}/${repo} [${repoRes.status}]. Kontrollera användarnamn, repo-namn och att token har Contents + Actions + Workflows.`,
+          },
+          502,
+        );
+      }
+      return json({ state: "queued", detail: "Byggflödet har inte registrerats hos GitHub än." });
+    }
     if (!runsRes.ok) {
       const body = await runsRes.text();
       return json({ error: `Kunde inte läsa byggstatus [${runsRes.status}]: ${body.slice(0, 300)}` }, 502);
     }
+
     const runsData = (await runsRes.json()) as { workflow_runs: WorkflowRun[] };
     const wanted = `build-${buildId}`;
     const run = runsData.workflow_runs.find(
