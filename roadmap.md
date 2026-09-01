@@ -14,3 +14,7 @@
 - [x] Ärlig felklassning: upprepade "tillfälliga" fel räknas som misslyckad strategi
 - [x] Processgranskning: utvärdera metodval, roadmap och tidigare försök
 - [x] Roadmapen formas om av processgranskningens diagnos (dela upp, lägg till beroende, byt arkitektur, parkera)
+- [x] APK-bygge via GitHub Actions (push, dispatch, statuspollning, nedladdning)
+- [x] Kompilatorfel från bygget matas in som riktlinje till granskaren
+- [ ] Uppgradera GitHub-autentisering från PAT till GitHub App
+- [ ] Release-signering med egen nyckel (i dag debug-signerad APK)

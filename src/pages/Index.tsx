@@ -4,6 +4,8 @@ import { SpecViewer } from "@/components/SpecViewer";
 import { StreamingOutput } from "@/components/StreamingOutput";
 import { CodeGenerator } from "@/components/CodeGenerator";
 import { CodeReview } from "@/components/CodeReview";
+import { ApkBuilder } from "@/components/ApkBuilder";
+
 import { streamSpec } from "@/lib/streamSpec";
 import { AppSpec } from "@/types/appSpec";
 import { GeneratedFile } from "@/types/generatedProject";
@@ -176,6 +178,13 @@ const Index = () => {
         <section>
           <CodeReview spec={spec} generatedFiles={files} onFilesChange={setFiles} />
         </section>
+
+        {files.length > 0 && (
+          <section>
+            <ApkBuilder appName={spec?.appName || "android-app"} files={files} />
+          </section>
+        )}
+
 
 
       </main>

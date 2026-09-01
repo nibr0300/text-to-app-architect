@@ -105,6 +105,19 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
     }
   }, [directives]);
 
+  // Real compiler errors from the APK build become a binding directive.
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<string>).detail;
+      if (typeof detail !== "string" || !detail.trim()) return;
+      setDirectives((prev) => (prev.includes(detail) ? prev : [...prev, detail]));
+    };
+    window.addEventListener("nlp:build-errors", handler);
+    return () => window.removeEventListener("nlp:build-errors", handler);
+  }, []);
+
+
+
 
   useEffect(() => {
     try {
