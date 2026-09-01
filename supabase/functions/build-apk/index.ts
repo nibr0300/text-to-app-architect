@@ -167,17 +167,26 @@ async function pushProject(
   });
 
   // Dispatch the workflow on the branch that now contains both project and workflow.
-  const dispatch = await gh.request("/actions/workflows/build.yml/dispatches", {
-    method: "POST",
-    body: JSON.stringify({
-      ref: branch,
-      inputs: { project_path: projectPath, build_id: buildId },
-    }),
-  });
-  if (!dispatch.ok) {
-    const body = await dispatch.text();
-    throw new Error(`Kunde inte starta bygget [${dispatch.status}]: ${body.slice(0, 400)}`);
+  // A freshly committed workflow can take a few seconds to register, so retry 404s.
+  let lastError = "";
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const dispatch = await gh.request("/actions/workflows/build.yml/dispatches", {
+      method: "POST",
+      body: JSON.stringify({
+        ref: branch,
+        inputs: { project_path: projectPath, build_id: buildId },
+      }),
+    });
+    if (dispatch.ok) {
+      lastError = "";
+      break;
+    }
+    lastError = `[${dispatch.status}] ${(await dispatch.text()).slice(0, 300)}`;
+    if (dispatch.status !== 404) break;
+    await new Promise((resolve) => setTimeout(resolve, 4000));
   }
+  if (lastError) throw new Error(`Kunde inte starta bygget: ${lastError}`);
+
 
   return { commitSha: commit.sha, projectPath };
 }
