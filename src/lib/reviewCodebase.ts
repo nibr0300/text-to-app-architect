@@ -239,9 +239,10 @@ export async function reviewCodebase(
     strengths: [] as string[],
     nextSteps: [] as string[],
     roadmap: [] as ReviewRoadmapStep[],
+    completed: [] as CompletedItem[],
   };
   try {
-    const res = await call({ stage: "verdict", sections, lint: issues, directives, excluded, processAudit });
+    const res = await call({ stage: "verdict", sections, lint: issues, directives, excluded, processAudit, roadmap: priorRoadmap });
     verdict = { ...verdict, ...(res.verdict as typeof verdict) };
     cb.onStageDone("verdict");
   } catch (e) {
@@ -250,15 +251,23 @@ export async function reviewCodebase(
     throw e;
   }
 
+  const completed = verdict.completed ?? [];
+  // Fulfilled directives leave the binding list; finished stages leave the roadmap.
+  const fulfilledDirectives = new Set(
+    completed.filter((item) => item.kind === "directive").map((item) => item.title),
+  );
+  const completedStageIds = new Set(completed.filter((item) => item.kind === "stage" && item.id).map((item) => item.id as string));
+
   const report: ReviewReport = {
     ...verdict,
-    roadmap: carryOverAttempts(verdict.roadmap, priorRoadmap),
+    completed,
+    roadmap: carryOverAttempts(verdict.roadmap, priorRoadmap).filter((step) => !completedStageIds.has(step.id)),
     processAudit: processAudit ?? undefined,
     sections,
     generatedAt: new Date().toISOString(),
     source,
     fileCount: files.length,
-    directives,
+    directives: directives.filter((item) => !fulfilledDirectives.has(item)),
   };
   report.delta = compareReports(report, previous);
 
