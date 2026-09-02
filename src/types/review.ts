@@ -118,6 +118,7 @@ export interface ReviewReport {
   strengths: string[];
   nextSteps: string[];
   roadmap: ReviewRoadmapStep[];
+  completed?: CompletedItem[];
   delta?: ReviewDelta;
   processAudit?: ProcessAudit;
   sections: ReviewSection[];
