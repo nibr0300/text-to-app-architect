@@ -15,6 +15,7 @@ import {
   Brain,
 
   Check,
+  CheckCircle2,
   Info,
   Loader2,
   MessageSquare,
