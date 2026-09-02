@@ -414,13 +414,17 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
         {report && (
           <div className="space-y-3">
             <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-2">
-              <div className="flex items-baseline gap-2">
+              <div className="flex items-baseline gap-2 flex-wrap">
                 <span className="text-2xl font-bold text-primary">{report.completeness}%</span>
                 <span className="text-xs text-muted-foreground">
-                  uppskattad färdighetsgrad · {report.fileCount} filer ·{" "}
+                  AI-uppskattad funktionstäckning mot specen (ej byggstatus) · {report.fileCount} filer ·{" "}
                   {report.source === "upload" ? "uppladdad kodbas" : "genererat projekt"}
                 </span>
+                <span className="text-[10px] font-mono text-muted-foreground/80 w-full">
+                  granskad {new Date(report.generatedAt).toLocaleString("sv-SE")}
+                </span>
               </div>
+
               <p className="text-xs text-foreground">{report.verdict}</p>
               <div className="flex flex-wrap gap-2 text-[10px] font-mono">
                 {SEVERITY_ORDER.filter((s) => counts[s]).map((s) => (
