@@ -18,6 +18,16 @@ Severity scale: "critical" = app cannot build or the core promise does not work;
 
 OUTPUT FORMAT (strict): return ONLY a JSON object, no markdown fences.`;
 
+
+/** Hard facts about how these projects are actually built into an APK. */
+const BUILD_ENVIRONMENT = `BUILD ENVIRONMENT (authoritative — never contradict this, never propose work that violates it):
+- The project exists ONLY as a list of text files held by this system. Each build pushes exactly that file list into a fresh, empty folder in a private repo and compiles it there. There is no checkout, no git history, no local working copy.
+- Deleting a file means dropping it from that file list, which the repair stage does by itself. NEVER write a finding, roadmap stage, acceptance criterion or blocker that requires a human to run git rm, rm, gradle, adb or any shell command. There is no host operator, no terminal, no Android Studio, no emulator.
+- CI runs ubuntu-latest with JDK 17, the Android SDK and gradle/actions/setup-gradle@v4 pinned to Gradle 8.7, then executes "gradle assembleDebug --no-daemon --stacktrace". The Gradle WRAPPER IS NOT USED — gradlew, gradlew.bat, gradle-wrapper.properties and gradle-wrapper.jar are irrelevant. A missing wrapper is NOT a finding and must never become a roadmap stage.
+- Binary files can never be added (content is pushed as UTF-8 text). Never require a committed jar, keystore or binary asset.
+- The result is a debug-signed APK from assembleDebug; release signing and Play publishing are out of scope.
+A stage that can only be satisfied by an action outside this environment is a defective stage: reformulate it as work inside the file list, or leave it out.`;
+
 const AREA_PROMPTS: Record<string, { title: string; instructions: string }> = {
   architecture: {
     title: "Arkitektur & kodhälsa",
@@ -264,7 +274,7 @@ async function handle(body: Record<string, unknown>): Promise<HandlerResult> {
       user += `\n\nPROJECT FILE INDEX:\n${files.map((f) => f.path).join("\n")}`;
     }
     user += directiveBlock(directives);
-    const parsed = await callModel("openai/gpt-5.5", `${BASE}\n\n${PROCESS_PROMPT}`, user);
+    const parsed = await callModel("openai/gpt-5.5", `${BASE}\n\n${BUILD_ENVIRONMENT}\n\n${PROCESS_PROMPT}`, user);
     return { processAudit: sanitizeProcessAudit(parsed) };
   }
 
@@ -322,7 +332,7 @@ async function handle(body: Record<string, unknown>): Promise<HandlerResult> {
     if (processAudit && typeof processAudit === "object") {
       user += `\n\nPROCESS AUDIT OF THE PREVIOUS ROADMAP (binding — reshape the roadmap accordingly):\n${JSON.stringify(processAudit, null, 2)}`;
     }
-    const parsed = await callModel("openai/gpt-5.5", `${BASE}\n\n${VERDICT_PROMPT}`, user);
+    const parsed = await callModel("openai/gpt-5.5", `${BASE}\n\n${BUILD_ENVIRONMENT}\n\n${VERDICT_PROMPT}`, user);
     const pct = Number(parsed.completeness);
 
     const sectionList = Array.isArray(sections) ? sections as { findings?: { id?: unknown }[] }[] : [];
