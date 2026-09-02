@@ -27,15 +27,6 @@ function ghHeaders(token: string) {
   };
 }
 
-function toBase64(bytes: Uint8Array): string {
-  let binary = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(binary);
-}
-
 /** GitHub redirects binary downloads to storage; the auth header must not follow. */
 async function downloadRedirect(url: string, token: string): Promise<Uint8Array> {
   const res = await fetch(url, { headers: ghHeaders(token), redirect: "manual" });
@@ -165,13 +156,17 @@ serve(async (req) => {
       if (!apkEntry) return json({ error: "Artefakten innehöll ingen .apk-fil." }, 404);
 
       const apkBytes = await apkEntry.async("uint8array");
-      if (apkBytes.length > 40_000_000) {
-        return json({ error: "APK:n är för stor för direkt nedladdning." }, 413);
-      }
-      return json({
-        fileName: apkEntry.name.split("/").pop() ?? `${buildId}.apk`,
-        sizeBytes: apkBytes.length,
-        base64: toBase64(apkBytes),
+      const fileName = apkEntry.name.split("/").pop() ?? `${buildId}.apk`;
+      // Skicka rå binär (ingen base64-uppblåsning) så även stora APK:er går igenom.
+      return new Response(apkBytes, {
+        status: 200,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/vnd.android.package-archive",
+          "Content-Disposition": `attachment; filename="${fileName}"`,
+          "X-Apk-File-Name": fileName,
+          "Access-Control-Expose-Headers": "X-Apk-File-Name",
+        },
       });
     }
 
