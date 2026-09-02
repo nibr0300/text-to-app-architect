@@ -1,6 +1,7 @@
 import { AppSpec } from "@/types/appSpec";
 import { BuildContract, GeneratedFile } from "@/types/generatedProject";
 import {
+  CompletedItem,
   ProcessAudit,
   ReviewDelta,
   ReviewFinding,
