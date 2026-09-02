@@ -5,6 +5,16 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+
+/** Hard facts about how these projects are actually built into an APK. */
+const BUILD_ENVIRONMENT = `BUILD ENVIRONMENT (authoritative — never contradict this):
+- The project exists ONLY as a list of text files held by this system. Each build pushes exactly that file list into a fresh, empty folder in a private repo and compiles it. There is no pre-existing checkout, no git history and no local working copy.
+- Therefore "delete a file" simply means: return it in "deletePaths" so it is dropped from the file list. Never ask a human to run git rm, rm, mv or any shell command — you perform deletions yourself.
+- CI runs ubuntu-latest with JDK 17, the Android SDK, and gradle/actions/setup-gradle@v4 pinned to Gradle 8.7, then executes "gradle assembleDebug --no-daemon --stacktrace". The Gradle WRAPPER IS NOT USED: gradlew, gradlew.bat, gradle/wrapper/gradle-wrapper.properties and gradle-wrapper.jar are irrelevant and must never be a task, a blocker or an acceptance criterion.
+- No binary file can ever be added (blobs are pushed as UTF-8 text). Never design work that requires committing a jar, keystore, image or other binary.
+- There is no host operator, no terminal, no Android Studio and no emulator. Any "the host environment must run/execute ..." requirement is invalid: either do it in the file list yourself, or drop the task.
+- Output is a debug-signed APK from assembleDebug. Release signing and Play Store publishing are out of scope.`;
+
 const BASE_RULES = `You are a senior Android engineer. You generate production-quality Kotlin + XML for a native Android app from a JSON app specification.
 
 Global conventions (ALWAYS follow):
@@ -114,11 +124,13 @@ Rules:
 6. If the stage cannot be completed without credentials, commercial APIs, missing product decisions, binary assets or a live integration environment, make all safe code changes and return status "blocked" with structured blockers instead of inventing a stand-in.
 7. You may receive PREVIOUS FAILED ATTEMPTS. Never repeat their strategy on an unchanged project. Choose a materially different architecture and state the difference. If no materially different safe strategy exists, return status "blocked"; do not resubmit equivalent edits.
 8. A server/proxy integration that does not yet exist cannot be proven by Android-only code. Define the production client contract and honest disabled/error UI, then block only the credential, deployment or live integration-test work that truly requires external action.
-9. USER DIRECTIVES OUTRANK EVERYTHING. When the user directs that a capability be removed, removing it completely IS the correct fix — never keep it, never block on it, never report it as a missing feature.
+9. Deletion is a first-class action. To remove legacy, duplicated or user-forbidden files, list their exact paths in "deletePaths" — that alone removes them from the project. Never emit an emptied or commented-out file instead, and never block on a human running git.
+10. Never create, require or block on Gradle wrapper files; the build uses a preinstalled Gradle 8.7.
+11. USER DIRECTIVES OUTRANK EVERYTHING. When the user directs that a capability be removed, removing it completely IS the correct fix — never keep it, never block on it, never report it as a missing feature.
 
 
 Return ONLY this JSON shape:
-{"files":[{"path":"relative project path","content":"complete corrected file"}],"repair":{"status":"applied|blocked","strategySummary":"specific architecture and procedure used","differenceFromPrevious":"material difference from prior attempts, or first attempt","addressedFindingIds":["finding id"],"changedPaths":["path"],"manualFollowUps":["manual action"],"blockers":[{"kind":"credential|external-service|product-decision|binary-asset|integration-test|other","detail":"what cannot be completed in this codebase","requiredAction":"specific action that changes the prerequisites"}]}}`,
+{"files":[{"path":"relative project path","content":"complete corrected file"}],"deletePaths":["paths to remove from the project entirely"],"repair":{"status":"applied|blocked","strategySummary":"specific architecture and procedure used","differenceFromPrevious":"material difference from prior attempts, or first attempt","addressedFindingIds":["finding id"],"changedPaths":["path"],"manualFollowUps":["manual action"],"blockers":[{"kind":"credential|external-service|product-decision|binary-asset|integration-test|other","detail":"what cannot be completed in this codebase","requiredAction":"specific action that changes the prerequisites"}]}}`,
 
 };
 
