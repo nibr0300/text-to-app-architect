@@ -136,6 +136,7 @@ Return ONLY this JSON shape:
 
 interface HandlerResult {
   files?: { path: string; content: string }[];
+  deletePaths?: string[];
   contract?: unknown;
   report?: unknown;
   repair?: unknown;
@@ -230,7 +231,7 @@ async function handleStage(body: Record<string, unknown>): Promise<HandlerResult
     body: JSON.stringify({
       model,
       messages: [
-        { role: "system", content: `${BASE_RULES}\n\nSTAGE INSTRUCTIONS:\n${STAGE_PROMPTS[stage]}` },
+        { role: "system", content: `${BASE_RULES}\n\n${BUILD_ENVIRONMENT}\n\nSTAGE INSTRUCTIONS:\n${STAGE_PROMPTS[stage]}` },
         { role: "user", content: userContent },
       ],
       response_format: { type: "json_object" },
@@ -267,7 +268,15 @@ async function handleStage(body: Record<string, unknown>): Promise<HandlerResult
     (f) => f && typeof f.path === "string" && typeof f.content === "string",
   );
 
-  return { files: outFiles, contract: parsed.contract ?? null, report: parsed.report ?? null, repair: parsed.repair ?? null };
+  const deletePaths = (parsed.deletePaths ?? []).filter((p) => typeof p === "string" && p.length > 0);
+
+  return {
+    files: outFiles,
+    deletePaths,
+    contract: parsed.contract ?? null,
+    report: parsed.report ?? null,
+    repair: parsed.repair ?? null,
+  };
 }
 
 serve(async (req) => {
