@@ -316,6 +316,9 @@ async function handle(body: Record<string, unknown>): Promise<HandlerResult> {
         .map((item) => `- ${item.title}: ${item.reason ?? "parkerad"}`)
         .join("\n")}`;
     }
+    if (Array.isArray(roadmap) && roadmap.length) {
+      user += `\n\nPREVIOUS ROADMAP (evaluate each stage: close the ones whose acceptance criteria are now met, keep the rest):\n${JSON.stringify(roadmap, null, 2)}`;
+    }
     if (processAudit && typeof processAudit === "object") {
       user += `\n\nPROCESS AUDIT OF THE PREVIOUS ROADMAP (binding — reshape the roadmap accordingly):\n${JSON.stringify(processAudit, null, 2)}`;
     }
@@ -328,13 +331,20 @@ async function handle(body: Record<string, unknown>): Promise<HandlerResult> {
         .map((finding) => finding.id)
         .filter((id): id is string => typeof id === "string"),
     );
+    const completed = sanitizeCompleted(parsed.completed, directives);
+    const completedTitles = new Set(completed.map((item) => item.title.toLowerCase()));
+    const completedIds = new Set(completed.filter((item) => item.id).map((item) => item.id as string));
     return {
       verdict: {
         completeness: Number.isFinite(pct) ? Math.max(0, Math.min(100, Math.round(pct))) : 0,
         verdict: parsed.verdict ?? "",
         strengths: Array.isArray(parsed.strengths) ? parsed.strengths : [],
         nextSteps: Array.isArray(parsed.nextSteps) ? parsed.nextSteps : [],
-        roadmap: sanitizeRoadmap(parsed.roadmap, validFindingIds),
+        completed,
+        // A closed item must never reappear as an open stage.
+        roadmap: sanitizeRoadmap(parsed.roadmap, validFindingIds).filter(
+          (step) => !completedIds.has(step.id) && !completedTitles.has(step.title.toLowerCase()),
+        ),
       },
     };
   }
