@@ -60,22 +60,35 @@ export async function getBuildLogs(buildId: string): Promise<{ lines: string[]; 
 }
 
 export async function downloadApk(buildId: string): Promise<{ fileName: string; sizeBytes: number }> {
-  const result = await call<{ fileName: string; sizeBytes: number; base64: string }>(
-    "build-status",
-    { buildId, action: "artifact" },
-  );
+  const resp = await fetch(`${BASE}/build-status`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+    },
+    body: JSON.stringify({ buildId, action: "artifact" }),
+  });
 
-  const binary = atob(result.base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const contentType = resp.headers.get("content-type") ?? "";
+  if (!resp.ok || contentType.includes("application/json")) {
+    let message = `Fel ${resp.status}`;
+    try {
+      const data = (await resp.json()) as { error?: string };
+      if (data.error) message = data.error;
+    } catch {
+      // ignore
+    }
+    throw new Error(message);
+  }
 
-  const blob = new Blob([bytes], { type: "application/vnd.android.package-archive" });
+  const blob = await resp.blob();
+  const fileName = resp.headers.get("x-apk-file-name") || `${buildId}.apk`;
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = result.fileName || `${buildId}.apk`;
+  link.download = fileName;
   link.click();
   URL.revokeObjectURL(url);
 
-  return { fileName: result.fileName, sizeBytes: result.sizeBytes };
+  return { fileName, sizeBytes: blob.size };
 }
