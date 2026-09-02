@@ -293,7 +293,7 @@ async function handle(body: Record<string, unknown>): Promise<HandlerResult> {
     const model = area === "security" || area === "buildability" ? "openai/gpt-5.5" : "google/gemini-3.7-flash";
     const parsed = await callModel(
       model,
-      `${BASE}\n\nAUDIT AREA: ${cfg.title}\n${cfg.instructions}\n\nReturn exactly: ${AUDIT_SHAPE}`,
+      `${BASE}\n\n${BUILD_ENVIRONMENT}\n\nAUDIT AREA: ${cfg.title}\n${cfg.instructions}\n\nReturn exactly: ${AUDIT_SHAPE}`,
       user,
     );
 
