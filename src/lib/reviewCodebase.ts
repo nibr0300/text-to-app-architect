@@ -275,10 +275,26 @@ export async function reviewCodebase(
   return report;
 }
 
-function mergeFiles(existing: GeneratedFile[], incoming: GeneratedFile[]): GeneratedFile[] {
+function mergeFiles(
+  existing: GeneratedFile[],
+  incoming: GeneratedFile[],
+  deletePaths: string[] = [],
+): GeneratedFile[] {
   const map = new Map(existing.map((file) => [file.path, file]));
+  for (const path of deletePaths) map.delete(path);
   for (const file of incoming) map.set(file.path, file);
   return [...map.values()].sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/**
+ * The build pushes the in-app file list to a fresh folder and compiles it with a
+ * preinstalled Gradle 8.7. Nobody can run shell commands and no wrapper jar exists,
+ * so blockers demanding those actions describe work the pipeline already does.
+ */
+const IMPOSSIBLE_BLOCKER = /\b(git\s+rm|git\s+commit|git\s+push|gradle\s+wrapper|gradle-wrapper\.jar|gradlew|host environment must|run the following command|android studio|adb\b)/i;
+
+export function invalidHostBlocker(blockers: RepairBlocker[]): RepairBlocker | undefined {
+  return blockers.find((blocker) => IMPOSSIBLE_BLOCKER.test(`${blocker.detail} ${blocker.requiredAction}`));
 }
 
 function isSafeProjectPath(path: string): boolean {
@@ -331,6 +347,7 @@ function normalizedStrategy(value: string): string {
 
 interface ProjectRepairResponse {
   files?: GeneratedFile[];
+  deletePaths?: string[];
   repair?: {
     addressedFindingIds?: string[];
     changedPaths?: string[];
@@ -413,13 +430,27 @@ export async function repairRoadmapStep(
     throw new RoadmapRepairError(message, createFailedAttempt(fingerprint, "generation", message, strategySummary, differenceFromPrevious));
   }
   const changed = data.files ?? [];
+  const deletePaths = (data.deletePaths ?? []).filter(
+    (path) => typeof path === "string" && isSafeProjectPath(path) && files.some((file) => file.path === path),
+  );
   const blockers = data.repair?.blockers ?? [];
+  const impossible = invalidHostBlocker(blockers);
+  if (impossible) {
+    const message =
+      `Blockeraren avvisades: "${impossible.requiredAction}" kräver en handling utanför bygget. ` +
+      "Projektet är enbart en fillista som pushas till en tom mapp och kompileras med förinstallerad Gradle 8.7 — " +
+      "radering sker genom deletePaths och någon Gradle wrapper används aldrig.";
+    throw new RoadmapRepairError(
+      message,
+      createFailedAttempt(fingerprint, "generation", message, strategySummary, differenceFromPrevious),
+    );
+  }
   const isBlocked = data.repair?.status === "blocked";
   if (isBlocked && !blockers.length) {
     const message = "Etappen markerades blockerad utan en konkret blockerare eller nödvändig åtgärd.";
     throw new RoadmapRepairError(message, createFailedAttempt(fingerprint, "invalid-response", message, strategySummary, differenceFromPrevious));
   }
-  if (!changed.length && !isBlocked) {
+  if (!changed.length && !deletePaths.length && !isBlocked) {
     const message = "AI:n returnerade inga ändrade filer för etappen.";
     throw new RoadmapRepairError(message, createFailedAttempt(fingerprint, "generation", message, strategySummary, differenceFromPrevious));
   }
@@ -428,7 +459,7 @@ export async function repairRoadmapStep(
     throw new RoadmapRepairError(message, createFailedAttempt(fingerprint, "invalid-response", message, strategySummary, differenceFromPrevious));
   }
 
-  const merged = mergeFiles(files, changed);
+  const merged = mergeFiles(files, changed, deletePaths);
   const lintAfter = lintProject(merged);
   const beforeKeys = new Set(lintBefore.map(lintKey));
   const introducedIssues = lintAfter.filter((issue) => !beforeKeys.has(lintKey(issue)));
@@ -452,7 +483,7 @@ export async function repairRoadmapStep(
 
   return {
     files: merged,
-    changedPaths: changed.map((file) => file.path),
+    changedPaths: [...changed.map((file) => file.path), ...deletePaths.map((path) => `${path} (raderad)`)],
     addressedFindingIds: data.repair?.addressedFindingIds ?? step.findingIds,
     manualFollowUps: data.repair?.manualFollowUps ?? [],
     lintBefore: lintBefore.length,
