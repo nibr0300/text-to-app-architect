@@ -194,6 +194,22 @@ function directiveBlock(directives: unknown): string {
     .join("\n")}\nA feature the user asked to remove must NOT be reported as a missing feature; instead report any remaining traces of it as findings to delete.`;
 }
 
+/** Stages and user directives the verdict judges as verifiably finished, so they can leave the action list. */
+function sanitizeCompleted(value: unknown, directives: unknown) {
+  const known = new Set(stringList(directives, 20).map((item) => item.slice(0, 600)));
+  const raw = Array.isArray(value) ? value.slice(0, 30) : [];
+  return raw
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
+    .map((item) => ({
+      kind: String(item.kind) === "directive" ? ("directive" as const) : ("stage" as const),
+      id: typeof item.id === "string" ? item.id.slice(0, 80) : undefined,
+      title: typeof item.title === "string" ? item.title.slice(0, 600) : "",
+      evidence: typeof item.evidence === "string" ? item.evidence.slice(0, 800) : "",
+    }))
+    // A closed directive must match one the user actually gave, otherwise it is a hallucination.
+    .filter((item) => item.title && (item.kind === "stage" || known.has(item.title)));
+}
+
 const ROOT_CAUSES = [
   "stage-too-large",
   "missing-library",
