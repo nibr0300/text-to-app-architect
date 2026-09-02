@@ -192,9 +192,13 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
       });
       setReport(result);
       setHistory((current) => [...current.filter((item) => item.generatedAt !== result.generatedAt), result].slice(-5));
+      // Directives the review verified as carried out are dropped from the binding list.
+      const fulfilled = new Set((result.completed ?? []).filter((item) => item.kind === "directive").map((item) => item.title));
+      if (fulfilled.size) setDirectives((current) => current.filter((item) => !fulfilled.has(item)));
+      const closed = result.completed?.length ?? 0;
       toast({
         title: "Granskning klar",
-        description: `Uppskattad färdighetsgrad: ${result.completeness}%.`,
+        description: `Uppskattad färdighetsgrad: ${result.completeness}%.${closed ? ` ${closed} avklarad(e) punkt(er) borttagna.` : ""}`,
       });
     } catch (e) {
       toast({
