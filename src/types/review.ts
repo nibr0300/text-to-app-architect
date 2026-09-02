@@ -97,6 +97,14 @@ export interface RoadmapRepairResult {
   attempt: RoadmapRepairAttempt;
 }
 
+/** A roadmap stage or user directive the review judges as verifiably finished. */
+export interface CompletedItem {
+  kind: "stage" | "directive";
+  id?: string;
+  title: string;
+  evidence: string;
+}
+
 export interface ReviewSection {
   id: string;
   title: string;
@@ -110,6 +118,7 @@ export interface ReviewReport {
   strengths: string[];
   nextSteps: string[];
   roadmap: ReviewRoadmapStep[];
+  completed?: CompletedItem[];
   delta?: ReviewDelta;
   processAudit?: ProcessAudit;
   sections: ReviewSection[];
