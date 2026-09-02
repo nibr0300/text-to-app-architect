@@ -543,6 +543,23 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
               )}
             </div>
 
+            {(report.completed?.length ?? 0) > 0 && (
+              <div className="rounded-lg border border-border p-3 space-y-2">
+                <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-primary" /> Avklarat och borttaget från åtgärdslistan ({report.completed?.length})
+                </p>
+                {report.completed?.map((item, index) => (
+                  <div key={`${item.title}-${index}`} className="rounded-md bg-surface-code p-2">
+                    <p className="text-xs text-foreground">
+                      <span className="font-mono text-[10px] text-primary mr-1.5">{item.kind === "directive" ? "riktlinje" : "etapp"}</span>
+                      {item.title}
+                    </p>
+                    {item.evidence && <p className="text-[10px] text-muted-foreground mt-0.5">{item.evidence}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+
 
             {activeSteps.length > 0 && (
               <div className="rounded-lg border border-border p-3 space-y-3">
