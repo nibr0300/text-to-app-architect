@@ -79,10 +79,12 @@ The roadmap is not a restatement of findings. Group findings that share a root c
 
 The process audit is binding: a stage diagnosed as "stage-too-large" or "model-limitation" MUST be replaced by the smaller stages it prescribes; "missing-library"/"missing-external-tool" MUST become an explicit early stage that adds the named dependency or tooling before dependent work; "unrealistic-acceptance-criteria" MUST get statically verifiable criteria; "external-blocker"/"park" stages must NOT be recreated. Never reissue a stage in the same shape that already failed repeatedly.
 
-Return ONLY:
-{"completeness": 0-100 integer estimate of how much of a genuinely working app exists, "verdict":"2-4 sentences, direct and honest", "strengths":["what is genuinely well done"], "nextSteps":["prioritised actions, most important first"], "roadmap":[{"id":"stable-kebab-id","order":1,"title":"short stage title","objective":"the project-level outcome","rationale":"why these findings must be solved together","findingIds":["existing finding id"],"paths":["all files likely requiring coordinated edits"],"dependsOn":[],"acceptanceCriteria":["specific verifiable condition"]}]}
+You also receive the PREVIOUS ROADMAP and the USER DIRECTIVES. Part of your mandate is to CLOSE work that is genuinely finished: for every previous stage whose acceptance criteria are now verifiably met by the audited code, and for every user directive that is now fully carried out in the code, report it as completed and do NOT recreate it as a roadmap stage or as a finding. Only close something when the audit evidence supports it — never on optimism. Cite the concrete evidence (file/behaviour) for each closed item.
 
-Every critical or major finding must belong to exactly one roadmap stage. Use only finding ids and file paths present in the supplied audit. Weigh critical findings heavily: a project that cannot compile or whose core feature is placebo cannot score above 60.`;
+Return ONLY:
+{"completeness": 0-100 integer estimate of how much of a genuinely working app exists, "verdict":"2-4 sentences, direct and honest", "strengths":["what is genuinely well done"], "nextSteps":["prioritised actions, most important first"], "roadmap":[{"id":"stable-kebab-id","order":1,"title":"short stage title","objective":"the project-level outcome","rationale":"why these findings must be solved together","findingIds":["existing finding id"],"paths":["all files likely requiring coordinated edits"],"dependsOn":[],"acceptanceCriteria":["specific verifiable condition"]}],"completed":[{"kind":"stage|directive","id":"previous stage id when kind=stage","title":"stage title or the directive text verbatim","evidence":"why it is verifiably done"}]}
+
+Every critical or major finding must belong to exactly one roadmap stage. Use only finding ids and file paths present in the supplied audit. A completed item must never also appear in the roadmap. For kind="directive" the title MUST be the directive text copied verbatim. Weigh critical findings heavily: a project that cannot compile or whose core feature is placebo cannot score above 60.`;
 
 
 interface Finding {
