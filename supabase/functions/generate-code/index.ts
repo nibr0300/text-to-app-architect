@@ -144,7 +144,7 @@ interface HandlerResult {
 }
 
 async function handleStage(body: Record<string, unknown>): Promise<HandlerResult> {
-  const { stage, spec, screen, files, contract, issues, reviewReport, roadmapStep, previousAttempts, directives } = (body ?? {}) as {
+  const { stage, spec, screen, files, contract, issues, reviewReport, roadmapStep, previousAttempts, directives, reference } = (body ?? {}) as {
     stage?: string;
     spec?: Record<string, unknown> & { packageName?: string; screens?: { id: string; name: string }[] };
     screen?: unknown;
@@ -155,6 +155,7 @@ async function handleStage(body: Record<string, unknown>): Promise<HandlerResult
     roadmapStep?: unknown;
     previousAttempts?: unknown[];
     directives?: unknown;
+    reference?: unknown;
   };
 
 
@@ -206,6 +207,9 @@ async function handleStage(body: Record<string, unknown>): Promise<HandlerResult
       userContent += `\n\nUSER DIRECTIVES (BINDING — they override the spec, the audit report and the roadmap stage). If a directive removes a capability, delete its code, dependencies, permissions, resources, strings and UI entry points completely and rewire the remaining callers in the same batch. Never reintroduce it and never report it as a blocker:\n${directiveList
         .map((item, index) => `${index + 1}. ${item}`)
         .join("\n")}`;
+    }
+    if (typeof reference === "string" && reference.trim()) {
+      userContent += `\n\nUSER-SUPPLIED SOLUTION REFERENCE (authoritative — the user has already worked out these corrections and additions). Adopt this material as the target state: copy the given file contents and snippets into the project verbatim where they apply, adapting only package names and imports so the project compiles. Do not invent an alternative design that contradicts it, and do not report as a blocker anything this material already answers:\n${reference.slice(0, 120_000)}`;
     }
     if (previousAttempts?.length) {
       userContent += `\n\nPREVIOUS FAILED ATTEMPTS ON THIS UNCHANGED PROJECT (negative constraints — do not repeat):\n${JSON.stringify(previousAttempts, null, 2)}`;
