@@ -44,6 +44,7 @@ interface StageBody {
   sections?: ReviewSection[];
   lint?: LintIssue[];
   directives?: string[];
+  reference?: string;
   excluded?: { title: string; reason: string }[];
   roadmap?: ReviewRoadmapStep[];
   processAudit?: ProcessAudit | null;
@@ -156,6 +157,8 @@ export interface ReviewCallbacks {
 
 export interface ReviewOptions {
   directives?: string[];
+  /** User-supplied solution material (file contents, snippets) treated as the authoritative target state. */
+  reference?: string;
   excluded?: { title: string; reason: string }[];
 }
 
@@ -192,6 +195,7 @@ export async function reviewCodebase(
   const sections: ReviewSection[] = [];
   const directives = (options.directives ?? []).filter((item) => item.trim().length > 0);
   const excluded = options.excluded ?? [];
+  const reference = (options.reference ?? "").trim() || undefined;
 
   cb.onStageStart("lint");
   const issues = lintProject(files);
@@ -203,7 +207,7 @@ export async function reviewCodebase(
     const id = `area:${area.id}`;
     cb.onStageStart(id);
     try {
-      const res = await call({ stage: "audit", area: area.id, spec, files, directives });
+      const res = await call({ stage: "audit", area: area.id, spec, files, directives, reference });
       const section = res.section as ReviewSection | undefined;
       if (section) {
         const stableSection = stabilizeSection(section);
@@ -224,7 +228,7 @@ export async function reviewCodebase(
   if (hasRepairExperience(priorRoadmap)) {
     cb.onStageStart("process");
     try {
-      const res = await call({ stage: "process", roadmap: priorRoadmap, lint: issues, files, directives });
+      const res = await call({ stage: "process", roadmap: priorRoadmap, lint: issues, files, directives, reference });
       processAudit = (res.processAudit as ProcessAudit | undefined) ?? null;
       cb.onStageDone("process");
     } catch (e) {
@@ -243,7 +247,7 @@ export async function reviewCodebase(
     completed: [] as CompletedItem[],
   };
   try {
-    const res = await call({ stage: "verdict", sections, lint: issues, directives, excluded, processAudit, roadmap: priorRoadmap });
+    const res = await call({ stage: "verdict", sections, lint: issues, directives, reference, excluded, processAudit, roadmap: priorRoadmap });
     verdict = { ...verdict, ...(res.verdict as typeof verdict) };
     cb.onStageDone("verdict");
   } catch (e) {
@@ -368,6 +372,7 @@ export async function repairRoadmapStep(
   files: GeneratedFile[],
   contract: BuildContract | null = null,
   directives: string[] = [],
+  reference = "",
 ): Promise<RoadmapRepairResult> {
   if (!files.length) throw new Error("Hittade inga projektfiler att reparera.");
   const lintBefore = lintProject(files);
@@ -395,6 +400,7 @@ export async function repairRoadmapStep(
       roadmapStep: step,
       previousAttempts,
       directives: activeDirectives,
+      reference: reference.trim() || undefined,
     }),
   });
 
