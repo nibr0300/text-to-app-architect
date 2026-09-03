@@ -19,7 +19,9 @@ import {
   Info,
   Loader2,
   MessageSquare,
+  FileText,
   ScanSearch,
+  Upload,
   Sparkles,
   Route,
   ShieldAlert,
@@ -38,6 +40,7 @@ const HISTORY_KEY = "nlp-programmer:review-history";
 const UPLOAD_KEY = "nlp-programmer:review-upload";
 const CONTRACT_KEY = "nlp-programmer:last-contract";
 const DIRECTIVES_KEY = "nlp-programmer:review-directives";
+const REFERENCE_KEY = "nlp-programmer:solution-reference";
 
 function loadJson<T>(key: string): T | null {
   try {
@@ -96,6 +99,9 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
   const [lastRepair, setLastRepair] = useState<RoadmapRepairResult | null>(null);
   const [directives, setDirectives] = useState<string[]>(() => loadJson<string[]>(DIRECTIVES_KEY) ?? []);
   const [draft, setDraft] = useState("");
+  // User-supplied solution material (concrete fixes / file contents) that outranks the AI's own ideas.
+  const [reference, setReference] = useState<string>(() => localStorage.getItem(REFERENCE_KEY) ?? "");
+  const [loadingReference, setLoadingReference] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -105,6 +111,15 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
       // ignore
     }
   }, [directives]);
+
+  useEffect(() => {
+    try {
+      if (reference.trim()) localStorage.setItem(REFERENCE_KEY, reference);
+      else localStorage.removeItem(REFERENCE_KEY);
+    } catch {
+      // ignore
+    }
+  }, [reference]);
 
   // Real compiler errors from the APK build become a binding directive.
   useEffect(() => {
@@ -185,6 +200,7 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
         onStageError: (id, error) => update(id, { status: "error", error }),
       }, previous, {
         directives,
+        reference,
         excluded: parkedSteps.map((step) => ({
           title: step.title,
           reason: step.status === "dismissed" ? "avfärdad av användaren" : "blockerad av externt hinder",
@@ -209,7 +225,7 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
     } finally {
       setIsRunning(false);
     }
-  }, [files, spec, source, useUpload, toast, report, directives, parkedSteps]);
+  }, [files, spec, source, useUpload, toast, report, directives, reference, parkedSteps]);
 
   const handleRepairStep = useCallback(
     async (step: ReviewRoadmapStep) => {
@@ -218,7 +234,7 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
       setLastRepair(null);
       try {
         const contract = useUpload ? null : loadJson<BuildContract>(CONTRACT_KEY);
-        const result = await repairRoadmapStep(useUpload ? null : spec, report, step, files, contract, directives);
+        const result = await repairRoadmapStep(useUpload ? null : spec, report, step, files, contract, directives, reference);
         if (result.changedPaths.length) {
           if (useUpload) setUploaded(result.files);
           else onFilesChange?.(result.files);
@@ -262,7 +278,7 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
         setFixingStep(null);
       }
     },
-    [files, spec, useUpload, onFilesChange, toast, report, directives],
+    [files, spec, useUpload, onFilesChange, toast, report, directives, reference],
   );
 
   const handleDismissStep = useCallback((stepId: string) => {
@@ -456,7 +472,73 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
             )}
 
             {report.processAudit && (
-              <div className="rounded-lg border border-accent/40 bg-accent/5 p-3 space-y-2">
+              <div className="rounded-lg border border-primary/40 bg-primary/5 p-3 space-y-2">
+              <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                <FileText className="h-3.5 w-3.5 text-primary" /> Eget lösningsförslag / referenskod
+              </p>
+              <p className="text-[10px] text-muted-foreground">
+                Klistra in färdiga filer, kodsnuttar eller korrigeringar du redan tagit fram. Materialet blir målbild för både granskaren och byggaren — de kopierar det rakt av i stället för att uppfinna egna lösningar, och punkter som redan matchar räknas som klara.
+              </p>
+              <textarea
+                value={reference}
+                onChange={(event) => setReference(event.target.value)}
+                placeholder="Klistra in kompletterande kod, filinnehåll eller instruktioner…"
+                rows={reference ? 8 : 4}
+                className="w-full rounded-md border border-border bg-background px-2 py-1.5 font-mono text-[11px] text-foreground placeholder:text-muted-foreground/60"
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs text-foreground hover:bg-muted">
+                  <Upload className="h-3.5 w-3.5" />
+                  Läs in fil (.md/.txt/.kt/.xml)
+                  <input
+                    type="file"
+                    accept=".md,.txt,.kt,.java,.xml,.gradle,.kts,.json"
+                    className="hidden"
+                    onChange={async (event) => {
+                      const file = event.target.files?.[0];
+                      event.target.value = "";
+                      if (!file) return;
+                      const text = await file.text();
+                      setReference((current) => (current.trim() ? `${current}\n\n${text}` : text));
+                      toast({ title: "Referensmaterial inläst", description: file.name });
+                    }}
+                  />
+                </label>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1.5 text-xs"
+                  disabled={loadingReference}
+                  onClick={async () => {
+                    setLoadingReference(true);
+                    try {
+                      const res = await fetch("/komplettering.md");
+                      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                      const text = await res.text();
+                      setReference(text);
+                      toast({ title: "Komplettering inläst", description: "Ditt uppladdade lösningsförslag är nu referensmaterial." });
+                    } catch (e) {
+                      toast({ title: "Kunde inte läsa in", description: e instanceof Error ? e.message : "Okänt fel", variant: "destructive" });
+                    } finally {
+                      setLoadingReference(false);
+                    }
+                  }}
+                >
+                  {loadingReference ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                  Läs in min komplettering
+                </Button>
+                {reference.trim() && (
+                  <>
+                    <span className="text-[10px] text-muted-foreground">{reference.length.toLocaleString("sv-SE")} tecken aktiva</span>
+                    <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setReference("")}>
+                      Rensa
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-accent/40 bg-accent/5 p-3 space-y-2">
                 <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
                   <Brain className="h-3.5 w-3.5 text-accent" /> Processgranskning — lärdom av tidigare försök
                 </p>
