@@ -204,6 +204,13 @@ function directiveBlock(directives: unknown): string {
     .join("\n")}\nA feature the user asked to remove must NOT be reported as a missing feature; instead report any remaining traces of it as findings to delete.`;
 }
 
+/** Reference material supplied by the user: concrete solutions, file contents or snippets to adopt. */
+function referenceBlock(reference: unknown): string {
+  if (typeof reference !== "string" || !reference.trim()) return "";
+  return `\n\nUSER-SUPPLIED SOLUTION REFERENCE (authoritative — the user has already worked out these corrections and additions). Treat it as the intended target state: anything already matching it is DONE and must not be reported as missing; anything diverging from it is a finding, and the roadmap should adopt this material verbatim where it applies. Never propose an alternative design that contradicts it:\n${reference.slice(0, 120_000)}`;
+}
+
+
 /** Stages and user directives the verdict judges as verifiably finished, so they can leave the action list. */
 function sanitizeCompleted(value: unknown, directives: unknown) {
   const known = new Set(stringList(directives, 20).map((item) => item.slice(0, 600)));
