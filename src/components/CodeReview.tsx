@@ -741,6 +741,32 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
               </div>
             )}
 
+            {report.contractResults && report.contractResults.length > 0 && (
+              <div className="rounded-lg border border-border p-3 space-y-2">
+                <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-primary" /> Kontraktets acceptanstester
+                  <span className="text-muted-foreground font-normal">
+                    — {report.contractResults.filter((t) => t.status === "pass").length} av {report.contractResults.length} klarade
+                  </span>
+                </p>
+                {report.contractResults.map((t) => (
+                  <div key={t.id} className="text-xs space-y-0.5">
+                    <p className="flex items-start gap-1.5">
+                      {t.status === "pass" ? (
+                        <CheckCircle2 className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
+                      ) : t.status === "fail" ? (
+                        <XCircle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
+                      ) : (
+                        <AlertTriangle className="h-3.5 w-3.5 text-accent shrink-0 mt-0.5" />
+                      )}
+                      <span className="text-foreground">{t.id}: {t.text}</span>
+                    </p>
+                    <p className="pl-5 text-muted-foreground">{t.evidence}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {report.sections.map(renderSection)}
 
             {report.nextSteps.length > 0 && (
