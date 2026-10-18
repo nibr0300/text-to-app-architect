@@ -14,6 +14,7 @@ import {
   RoadmapRepairResult,
 } from "@/types/review";
 import { LintIssue, lintProject } from "@/lib/lintProject";
+import { getAcceptanceTests } from "@/lib/appContract";
 
 
 const REVIEW_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/review-codebase`;
@@ -224,6 +225,20 @@ export async function reviewCodebase(
       const msg = e instanceof Error ? e.message : "Okänt fel";
       cb.onStageError(id, msg);
       throw e;
+    }
+  }
+
+  let contractResults: import("@/types/review").ContractTestResult[] | undefined;
+  const contractTests = spec ? getAcceptanceTests(spec) : [];
+  if (contractTests.length) {
+    cb.onStageStart("contract");
+    try {
+      const res = await call({ stage: "contract", contractTests, files });
+      contractResults = res.contractResults as typeof contractResults;
+      cb.onStageDone("contract");
+    } catch (e) {
+      // A failed contract review must never block the substantive review.
+      cb.onStageError("contract", e instanceof Error ? e.message : "Okänt fel");
     }
   }
 
