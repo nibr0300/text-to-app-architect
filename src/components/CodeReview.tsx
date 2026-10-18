@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   AlertTriangle,
   Ban,
+  XCircle,
   Brain,
 
   Check,
