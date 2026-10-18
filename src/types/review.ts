@@ -155,7 +155,13 @@ export interface ReviewReport {
   fileCount: number;
   directives?: string[];
   contractResults?: ContractTestResult[];
+  /** Completion computed from evidence in this report — reproducible, unlike the AI estimate. */
+  score?: DeterministicScore;
+  /** Hash of everything the review depended on; the same key means a re-run would repeat the answer. */
+  inputKey?: string;
+  lintSummary?: { errors: number; warnings: number };
 }
+
 
 
 export type ReviewStageStatus = "pending" | "running" | "done" | "error";

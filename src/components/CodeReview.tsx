@@ -3,7 +3,9 @@ import { AppSpec } from "@/types/appSpec";
 import { GeneratedFile } from "@/types/generatedProject";
 import { BuildContract } from "@/types/generatedProject";
 import { ReviewFinding, ReviewReport, ReviewRoadmapStep, ReviewSection, ReviewStage, RoadmapRepairResult } from "@/types/review";
-import { hasRepairExperience, planReviewStages, repairRoadmapStep, reviewCodebase, RoadmapRepairError } from "@/lib/reviewCodebase";
+import { hasRepairExperience, planReviewStages, repairRoadmapStep, reviewCodebase, reviewInputKey, RoadmapRepairError } from "@/lib/reviewCodebase";
+import { scoreReport } from "@/lib/completeness";
+
 import { ZipUpload } from "@/components/ZipUpload";
 import { FileTreeViewer } from "@/components/FileTreeViewer";
 import { Button } from "@/components/ui/button";
@@ -164,6 +166,19 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
 
   const files = useUpload ? uploaded : generatedFiles;
   const source: "generated" | "upload" = useUpload ? "upload" : "generated";
+
+  // A review only answers for the inputs it was given. Recomputing the key tells us whether
+  // anything the answer depends on has actually changed since the last run.
+  const currentKey = useMemo(
+    () => reviewInputKey(files, useUpload ? null : spec, directives, reference, source),
+    [files, spec, useUpload, directives, reference, source],
+  );
+  const unchanged = !!report?.inputKey && report.inputKey === currentKey;
+  const [forceReview, setForceReview] = useState(false);
+  useEffect(() => setForceReview(false), [currentKey]);
+
+  const score = useMemo(() => (report ? report.score ?? scoreReport(report) : null), [report]);
+
 
   const counts = useMemo(() => {
     const map: Record<string, number> = {};
