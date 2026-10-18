@@ -9,7 +9,6 @@ import { ApkBuilder } from "@/components/ApkBuilder";
 
 import { streamSpec } from "@/lib/streamSpec";
 import { AppSpec } from "@/types/appSpec";
-import { buildContractYaml } from "@/lib/appContract";
 import { GeneratedFile } from "@/types/generatedProject";
 import { useToast } from "@/hooks/use-toast";
 import { Terminal, Smartphone } from "lucide-react";
@@ -71,32 +70,32 @@ const Index = () => {
   const [files, setFiles] = useState<GeneratedFile[]>(() => loadStoredFiles());
   const [contractYaml, setContractYaml] = useState(() => loadStoredContract()?.yaml ?? "");
   const [contractApproved, setContractApproved] = useState(() => loadStoredContract()?.approved ?? false);
+  const [contractSpecKey, setContractSpecKey] = useState(() => loadStoredContract()?.specKey ?? "");
   const { toast } = useToast();
 
   const handleContractChange = useCallback((approved: boolean, yaml: string) => {
     setContractApproved(approved);
     setContractYaml(yaml);
-  }, []);
+    setContractSpecKey(approved && spec ? specKeyOf(spec) : "");
+  }, [spec]);
 
   // Approval only counts for the spec the contract belongs to.
   // If a different spec is loaded, require re-approval.
   useEffect(() => {
-    if (!spec || !contractApproved) return;
-    const stored = loadStoredContract();
-    if (!stored?.specKey || stored.specKey !== specKeyOf(spec)) {
+    if (spec && contractApproved && contractSpecKey !== specKeyOf(spec)) {
       setContractApproved(false);
     }
-  }, [spec, contractApproved]);
+  }, [spec, contractApproved, contractSpecKey]);
 
   // Persist the contract + approval state
   useEffect(() => {
     try {
-      if (contractYaml) localStorage.setItem(CONTRACT_STORAGE_KEY, JSON.stringify({ yaml: contractYaml, approved: contractApproved, specKey: spec ? specKeyOf(spec) : undefined }));
+      if (contractYaml) localStorage.setItem(CONTRACT_STORAGE_KEY, JSON.stringify({ yaml: contractYaml, approved: contractApproved, specKey: contractSpecKey }));
       else localStorage.removeItem(CONTRACT_STORAGE_KEY);
     } catch {
       // Storage full or unavailable — ignore
     }
-  }, [contractYaml, contractApproved]);
+  }, [contractYaml, contractApproved, contractSpecKey]);
 
   // Persist the latest generated spec so it survives leaving/reopening the app
   useEffect(() => {
