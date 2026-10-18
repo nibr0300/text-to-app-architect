@@ -201,7 +201,19 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
       toast({ title: "Ingen kodbas att granska", variant: "destructive" });
       return;
     }
+    // Nothing the previous answer depended on has changed, so a new review would return the same
+    // sections and cost the same credits. The first click says so; the second one forces a run.
+    if (unchanged && !forceReview) {
+      setForceReview(true);
+      toast({
+        title: "Projektet är oförändrat",
+        description: "Tidigare granskning gäller. Klicka igen för att köra en ny AI-granskning ändå.",
+      });
+      return;
+    }
+    setForceReview(false);
     setIsRunning(true);
+
     const previous = report;
     setLastRepair(null);
     setStages(planReviewStages(hasRepairExperience(previous?.roadmap ?? []), !useUpload && !!spec).map<ReviewStage>((s) => ({ ...s, status: "pending" })));
@@ -230,7 +242,7 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
       const closed = result.completed?.length ?? 0;
       toast({
         title: "Granskning klar",
-        description: `Uppskattad färdighetsgrad: ${result.completeness}%.${closed ? ` ${closed} avklarad(e) punkt(er) borttagna.` : ""}`,
+        description: `Bevisberäknad färdighetsgrad: ${result.score?.score ?? scoreReport(result).score}%.${closed ? ` ${closed} avklarad(e) punkt(er) borttagna.` : ""}`,
       });
     } catch (e) {
       toast({
@@ -241,7 +253,7 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
     } finally {
       setIsRunning(false);
     }
-  }, [files, spec, source, useUpload, toast, report, directives, reference, parkedSteps]);
+  }, [files, spec, source, useUpload, toast, report, directives, reference, parkedSteps, unchanged, forceReview]);
 
   const handleRepairStep = useCallback(
     async (step: ReviewRoadmapStep) => {
@@ -414,8 +426,22 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
 
         <Button onClick={handleRun} disabled={isRunning || files.length === 0} className="gap-2">
           {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-          {report ? "Granska igen" : "Starta djupgranskning"}
+          {unchanged && forceReview
+            ? "Kör ny AI-granskning ändå"
+            : unchanged
+              ? "Granska igen (oförändrat)"
+              : report
+                ? "Granska igen"
+                : "Starta djupgranskning"}
         </Button>
+
+        {unchanged && !isRunning && (
+          <p className="text-[10px] font-mono text-muted-foreground">
+            Ingen ändring sedan förra granskningen — ett nytt AI-anrop ger samma svar och kostar krediter.
+            {forceReview && " Klicka igen för att köra ändå."}
+          </p>
+        )}
+
 
         {stages.length > 0 && (
           <div className="space-y-1 rounded-lg border border-border bg-surface-code p-3">
@@ -447,15 +473,48 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
           <div className="space-y-3">
             <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-2">
               <div className="flex items-baseline gap-2 flex-wrap">
-                <span className="text-2xl font-bold text-primary">{report.completeness}%</span>
+                <span className="text-2xl font-bold text-primary">{score?.score ?? 0}%</span>
                 <span className="text-xs text-muted-foreground">
-                  AI-uppskattad funktionstäckning mot specen (ej byggstatus) · {report.fileCount} filer ·{" "}
+                  Bevisberäknad färdighetsgrad (ej byggstatus) · {report.fileCount} filer ·{" "}
                   {report.source === "upload" ? "uppladdad kodbas" : "genererat projekt"}
                 </span>
                 <span className="text-[10px] font-mono text-muted-foreground/80 w-full">
                   granskad {new Date(report.generatedAt).toLocaleString("sv-SE")}
                 </span>
               </div>
+
+              {score && (
+                <div className="space-y-1.5">
+                  {score.components.map((component) => (
+                    <div key={component.id} className="text-[11px] leading-tight">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="text-foreground">{component.label}</span>
+                        <span className="font-mono text-muted-foreground">
+                          {component.points}/{component.max}
+                        </span>
+                      </div>
+                      <div className="h-1 rounded-full bg-surface-code overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-primary"
+                          style={{ width: `${Math.round((component.points / component.max) * 100)}%` }}
+                        />
+                      </div>
+                      <p className="text-[10px] font-mono text-muted-foreground">{component.detail}</p>
+                    </div>
+                  ))}
+                  {score.gates.map((gate) => (
+                    <p key={gate} className="text-[10px] font-mono text-destructive">
+                      {gate}
+                    </p>
+                  ))}
+                  <p className="text-[10px] font-mono text-muted-foreground/80">{score.basis}</p>
+                </div>
+              )}
+
+              <p className="text-[10px] font-mono text-muted-foreground">
+                AI-uppskattning {report.completeness}% — visas bara som jämförelse, räknas inte in i siffran ovan.
+              </p>
+
 
               <p className="text-xs text-foreground">{report.verdict}</p>
               <div className="flex flex-wrap gap-2 text-[10px] font-mono">
@@ -470,17 +529,18 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
             {report.delta && (
               <div className={cn(
                 "rounded-lg border p-3 space-y-1",
-                report.delta.completeness >= 0 && report.delta.critical <= 0 && report.delta.major <= 0
+                (report.delta.score ?? report.delta.completeness) >= 0 && report.delta.critical <= 0 && report.delta.major <= 0
                   ? "border-primary/30 bg-primary/5"
                   : "border-destructive/40 bg-destructive/10",
               )}>
                 <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
-                  {report.delta.completeness >= 0 ? <Route className="h-3.5 w-3.5 text-primary" /> : <ShieldAlert className="h-3.5 w-3.5 text-destructive" />}
+                  {(report.delta.score ?? report.delta.completeness) >= 0 ? <Route className="h-3.5 w-3.5 text-primary" /> : <ShieldAlert className="h-3.5 w-3.5 text-destructive" />}
                   Förändring sedan föregående granskning
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Färdighetsgrad {report.delta.completeness >= 0 ? "+" : ""}{report.delta.completeness} procentenheter · lösta {report.delta.resolved.length} · kvar {report.delta.remaining.length} · nya {report.delta.introduced.length}
+                  Färdighetsgrad {(report.delta.score ?? report.delta.completeness) >= 0 ? "+" : ""}{report.delta.score ?? report.delta.completeness} procentenheter · lösta {report.delta.resolved.length} · kvar {report.delta.remaining.length} · nya {report.delta.introduced.length}
                 </p>
+
                 <p className="text-[10px] font-mono text-muted-foreground">
                   Kritiska {report.delta.critical >= 0 ? "+" : ""}{report.delta.critical} · allvarliga {report.delta.major >= 0 ? "+" : ""}{report.delta.major}
                 </p>
