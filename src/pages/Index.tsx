@@ -3,6 +3,7 @@ import { DescriptionInput } from "@/components/DescriptionInput";
 import { SpecViewer } from "@/components/SpecViewer";
 import { StreamingOutput } from "@/components/StreamingOutput";
 import { CodeGenerator } from "@/components/CodeGenerator";
+import { ContractViewer } from "@/components/ContractViewer";
 import { CodeReview } from "@/components/CodeReview";
 import { ApkBuilder } from "@/components/ApkBuilder";
 
@@ -14,6 +15,22 @@ import { Terminal, Smartphone } from "lucide-react";
 
 const SPEC_STORAGE_KEY = "nlp-programmer:last-spec";
 const CODE_STORAGE_KEY = "nlp-programmer:last-project";
+const CONTRACT_STORAGE_KEY = "nlp-programmer:last-contract";
+
+interface StoredContract {
+  yaml: string;
+  approved: boolean;
+}
+
+function loadStoredContract(): StoredContract | null {
+  try {
+    const raw = localStorage.getItem(CONTRACT_STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as StoredContract;
+  } catch {
+    return null;
+  }
+}
 
 interface StoredResult {
   spec: AppSpec | null;
