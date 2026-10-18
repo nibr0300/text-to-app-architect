@@ -292,6 +292,7 @@ export async function reviewCodebase(
     source,
     fileCount: files.length,
     directives: directives.filter((item) => !fulfilledDirectives.has(item)),
+    contractResults,
   };
   report.delta = compareReports(report, previous);
 

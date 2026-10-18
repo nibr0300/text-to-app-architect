@@ -188,7 +188,7 @@ export function CodeReview({ spec, generatedFiles, onFilesChange }: CodeReviewPr
     setIsRunning(true);
     const previous = report;
     setLastRepair(null);
-    setStages(planReviewStages(hasRepairExperience(previous?.roadmap ?? [])).map<ReviewStage>((s) => ({ ...s, status: "pending" })));
+    setStages(planReviewStages(hasRepairExperience(previous?.roadmap ?? []), !useUpload && !!spec).map<ReviewStage>((s) => ({ ...s, status: "pending" })));
 
     const update = (id: string, patch: Partial<ReviewStage>) =>
       setStages((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
