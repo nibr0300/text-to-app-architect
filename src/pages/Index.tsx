@@ -109,6 +109,8 @@ const Index = () => {
     setSpec(null);
     setRawJson("");
     setFiles([]);
+    setContractYaml("");
+    setContractApproved(false);
 
 
     let accumulated = "";
@@ -204,8 +206,20 @@ const Index = () => {
 
         {spec && (
           <section>
+            <ContractViewer spec={spec} approved={contractApproved} onApproveChange={handleContractChange} />
+          </section>
+        )}
+
+        {spec && contractApproved && (
+          <section>
             <CodeGenerator spec={spec} files={files} onFilesChange={setFiles} />
           </section>
+        )}
+
+        {spec && !contractApproved && (
+          <p className="text-center text-xs text-muted-foreground">
+            Godkänn kontraktet ovan för att låsa upp kodgenerering.
+          </p>
         )}
 
         {/* Optional add-on: independent deep review — works with or without a spec */}
