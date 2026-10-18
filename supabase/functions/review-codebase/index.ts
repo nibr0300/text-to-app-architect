@@ -307,9 +307,10 @@ async function handle(body: Record<string, unknown>): Promise<HandlerResult> {
     const tree = files.map((f) => `--- ${f.path} ---\n${f.content}`).join("\n\n");
     const user = `APP CONTRACT ACCEPTANCE TESTS (each must be judged against the source):\n${JSON.stringify(tests, null, 2)}\n\nPROJECT SOURCE:\n${tree}`;
     const parsed = await callModel(
-      "google/gemini-3.7-flash",
+      "openai/gpt-6-astra",
       `${BASE}\n\n${BUILD_ENVIRONMENT}\n\n${CONTRACT_PROMPT}`,
       user,
+      { reasoning_effort: "low" },
     );
     const knownIds = new Set(tests.map((t) => t.id));
     const results = (Array.isArray(parsed.results) ? parsed.results : [])
