@@ -21,6 +21,11 @@ const CONTRACT_STORAGE_KEY = "nlp-programmer:last-contract";
 interface StoredContract {
   yaml: string;
   approved: boolean;
+  specKey?: string;
+}
+
+function specKeyOf(spec: AppSpec): string {
+  return JSON.stringify([spec.appName, spec.packageName, spec.description]);
 }
 
 function loadStoredContract(): StoredContract | null {
@@ -73,20 +78,20 @@ const Index = () => {
     setContractYaml(yaml);
   }, []);
 
-  // Approval only counts for the spec the contract was derived from.
-  // If the contract no longer matches the current spec, require re-approval.
+  // Approval only counts for the spec the contract belongs to.
+  // If a different spec is loaded, require re-approval.
   useEffect(() => {
     if (!spec || !contractApproved) return;
-    if (contractYaml && contractYaml !== buildContractYaml(spec)) {
+    const stored = loadStoredContract();
+    if (!stored?.specKey || stored.specKey !== specKeyOf(spec)) {
       setContractApproved(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spec, contractYaml]);
+  }, [spec, contractApproved]);
 
   // Persist the contract + approval state
   useEffect(() => {
     try {
-      if (contractYaml) localStorage.setItem(CONTRACT_STORAGE_KEY, JSON.stringify({ yaml: contractYaml, approved: contractApproved }));
+      if (contractYaml) localStorage.setItem(CONTRACT_STORAGE_KEY, JSON.stringify({ yaml: contractYaml, approved: contractApproved, specKey: spec ? specKeyOf(spec) : undefined }));
       else localStorage.removeItem(CONTRACT_STORAGE_KEY);
     } catch {
       // Storage full or unavailable — ignore
