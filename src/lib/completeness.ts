@@ -103,6 +103,6 @@ export function scoreReport(report: ReviewReport): DeterministicScore {
     score,
     components,
     gates,
-    basis: `Beräknad ur ${tests.length} acceptanstester, ${errors + warnings} statiska avikelser och ${reviewed.length} AI-funnelser.`,
+    basis: `Beräknad ur ${tests.length} acceptanstester, ${errors + warnings} statiska avikelser och ${reviewed.length} AI-anmärkningar.`,
   };
 }

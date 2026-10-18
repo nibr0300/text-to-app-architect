@@ -15,6 +15,8 @@ Filosofi: Language-Based Relational Field-Architecture (RFA) – språk är käl
 
 ```text
 Text  -> generate-spec   -> AppSpec (JSON, motsvarar Text2Apps SAR)
+AppSpec -> appContract.ts -> App Contract (YAML + acceptanstester, deterministiskt, ingen AI)
+Kontrakt -> godkännande   -> kodgenerering låses upp först efter godkänt kontrakt
 AppSpec -> generate-code -> Kotlin/Gradle-projekt i 7 pass:
           skeleton, contract, ui, logic, integrate, (lint), repair
 Projekt -> review-codebase -> granskning, roadmap, reparation per etapp
