@@ -63,7 +63,24 @@ const Index = () => {
   const [spec, setSpec] = useState<AppSpec | null>(() => loadStoredResult()?.spec ?? null);
   const [rawJson, setRawJson] = useState(() => loadStoredResult()?.rawJson ?? "");
   const [files, setFiles] = useState<GeneratedFile[]>(() => loadStoredFiles());
+  const [contractYaml, setContractYaml] = useState(() => loadStoredContract()?.yaml ?? "");
+  const [contractApproved, setContractApproved] = useState(() => loadStoredContract()?.approved ?? false);
   const { toast } = useToast();
+
+  const handleContractChange = useCallback((approved: boolean, yaml: string) => {
+    setContractApproved(approved);
+    setContractYaml(yaml);
+  }, []);
+
+  // Persist the contract + approval state
+  useEffect(() => {
+    try {
+      if (contractYaml) localStorage.setItem(CONTRACT_STORAGE_KEY, JSON.stringify({ yaml: contractYaml, approved: contractApproved }));
+      else localStorage.removeItem(CONTRACT_STORAGE_KEY);
+    } catch {
+      // Storage full or unavailable — ignore
+    }
+  }, [contractYaml, contractApproved]);
 
   // Persist the latest generated spec so it survives leaving/reopening the app
   useEffect(() => {
