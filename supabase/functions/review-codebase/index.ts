@@ -131,6 +131,7 @@ async function callModel(model: string, system: string, user: string, extra?: Re
         { role: "user", content: user },
       ],
       response_format: { type: "json_object" },
+      ...extra,
     }),
   });
 
