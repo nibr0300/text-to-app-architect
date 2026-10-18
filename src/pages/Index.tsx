@@ -9,6 +9,7 @@ import { ApkBuilder } from "@/components/ApkBuilder";
 
 import { streamSpec } from "@/lib/streamSpec";
 import { AppSpec } from "@/types/appSpec";
+import { buildContractYaml } from "@/lib/appContract";
 import { GeneratedFile } from "@/types/generatedProject";
 import { useToast } from "@/hooks/use-toast";
 import { Terminal, Smartphone } from "lucide-react";
@@ -71,6 +72,16 @@ const Index = () => {
     setContractApproved(approved);
     setContractYaml(yaml);
   }, []);
+
+  // Approval only counts for the spec the contract was derived from.
+  // If the contract no longer matches the current spec, require re-approval.
+  useEffect(() => {
+    if (!spec || !contractApproved) return;
+    if (contractYaml && contractYaml !== buildContractYaml(spec)) {
+      setContractApproved(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spec, contractYaml]);
 
   // Persist the contract + approval state
   useEffect(() => {
