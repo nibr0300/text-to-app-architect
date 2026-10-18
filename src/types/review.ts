@@ -80,7 +80,28 @@ export interface ReviewDelta {
   introduced: string[];
   critical: number;
   major: number;
+  /** Evidence-based score (see lib/completeness.ts) for this review and the one before it. */
+  score?: number;
+  previousScore?: number;
 }
+
+/** One evidence source contributing to the deterministic completion score. */
+export interface ScoreComponent {
+  id: "contract" | "buildability" | "findings";
+  label: string;
+  points: number;
+  max: number;
+  detail: string;
+}
+
+/** Completion computed from verifiable evidence — reproducible, unlike an AI estimate. */
+export interface DeterministicScore {
+  score: number;
+  components: ScoreComponent[];
+  gates: string[];
+  basis: string;
+}
+
 
 
 export interface RoadmapRepairResult {
@@ -134,7 +155,13 @@ export interface ReviewReport {
   fileCount: number;
   directives?: string[];
   contractResults?: ContractTestResult[];
+  /** Completion computed from evidence in this report — reproducible, unlike the AI estimate. */
+  score?: DeterministicScore;
+  /** Hash of everything the review depended on; the same key means a re-run would repeat the answer. */
+  inputKey?: string;
+  lintSummary?: { errors: number; warnings: number };
 }
+
 
 
 export type ReviewStageStatus = "pending" | "running" | "done" | "error";

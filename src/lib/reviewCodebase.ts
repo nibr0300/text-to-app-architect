@@ -15,6 +15,8 @@ import {
 } from "@/types/review";
 import { LintIssue, lintProject } from "@/lib/lintProject";
 import { getAcceptanceTests } from "@/lib/appContract";
+import { scoreReport } from "@/lib/completeness";
+
 
 
 const REVIEW_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/review-codebase`;
@@ -146,12 +148,15 @@ export function compareReports(current: ReviewReport, previous: ReviewReport | n
   const majorBefore = allFindings(previous).filter((finding) => finding.severity === "major").length;
   return {
     completeness: current.completeness - previous.completeness,
+    score: scoreReport(current).score,
+    previousScore: scoreReport(previous).score,
     resolved: [...oldMap.keys()].filter((key) => !newMap.has(key)),
     remaining: [...newMap.keys()].filter((key) => oldMap.has(key)),
     introduced: [...newMap.keys()].filter((key) => !oldMap.has(key)),
     critical: criticalNow - criticalBefore,
     major: majorNow - majorBefore,
   };
+
 }
 
 export interface ReviewCallbacks {
@@ -201,6 +206,8 @@ export async function reviewCodebase(
   const directives = (options.directives ?? []).filter((item) => item.trim().length > 0);
   const excluded = options.excluded ?? [];
   const reference = (options.reference ?? "").trim() || undefined;
+  const inputKey = reviewInputKey(files, spec, directives, reference ?? "", source);
+
 
   cb.onStageStart("lint");
   const issues = lintProject(files);
@@ -293,10 +300,17 @@ export async function reviewCodebase(
     fileCount: files.length,
     directives: directives.filter((item) => !fulfilledDirectives.has(item)),
     contractResults,
+    lintSummary: {
+      errors: issues.filter((issue) => issue.severity === "error").length,
+      warnings: issues.filter((issue) => issue.severity === "warning").length,
+    },
+    inputKey,
   };
+  report.score = scoreReport(report);
   report.delta = compareReports(report, previous);
 
   return report;
+
 }
 
 function mergeFiles(
@@ -335,6 +349,21 @@ export function projectFingerprint(files: GeneratedFile[]): string {
     .map((file) => `${file.path}\u0000${file.content}`)
     .join("\u0001"));
 }
+
+/**
+ * Everything a review's answer depends on. When the key is unchanged, a fresh review would
+ * return the same sections and cost the same credits, so the caller can skip the AI entirely.
+ */
+export function reviewInputKey(
+  files: GeneratedFile[],
+  spec: AppSpec | null,
+  directives: string[],
+  reference: string,
+  source: "generated" | "upload",
+): string {
+  return stableHash(JSON.stringify([projectFingerprint(files), spec ?? null, directives, reference, source]));
+}
+
 
 export class RoadmapRepairError extends Error {
   readonly attempt: RoadmapRepairAttempt;
