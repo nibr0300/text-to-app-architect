@@ -112,6 +112,13 @@ export interface ReviewSection {
   findings: ReviewFinding[];
 }
 
+export interface ContractTestResult {
+  id: string;
+  text: string;
+  status: "pass" | "fail" | "unknown";
+  evidence: string;
+}
+
 export interface ReviewReport {
   completeness: number;
   verdict: string;
@@ -126,6 +133,7 @@ export interface ReviewReport {
   source: "generated" | "upload";
   fileCount: number;
   directives?: string[];
+  contractResults?: ContractTestResult[];
 }
 
 
