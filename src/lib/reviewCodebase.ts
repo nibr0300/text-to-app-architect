@@ -25,10 +25,13 @@ export const REVIEW_AREAS = [
   { id: "buildability", label: "Byggbarhet & beroenden" },
 ] as const;
 
-export function planReviewStages(withProcessAudit = false) {
+export function planReviewStages(withProcessAudit = false, withContract = false) {
   return [
     { id: "lint", label: "Statisk analys (syntax, plattformsanrop, nycklar)" },
     ...REVIEW_AREAS.map((a) => ({ id: `area:${a.id}`, label: `AI-revision: ${a.label}` })),
+    ...(withContract
+      ? [{ id: "contract", label: "Kontraktsgranskning: acceptanstester mot koden" }]
+      : []),
     ...(withProcessAudit
       ? [{ id: "process", label: "Processgranskning: metodval, roadmap och tidigare försök" }]
       : []),
@@ -37,7 +40,8 @@ export function planReviewStages(withProcessAudit = false) {
 }
 
 interface StageBody {
-  stage: "audit" | "verdict" | "process";
+  stage: "audit" | "verdict" | "process" | "contract";
+  contractTests?: { id: string; text: string; source: string }[];
   area?: string;
   spec?: AppSpec | null;
   files?: GeneratedFile[];
