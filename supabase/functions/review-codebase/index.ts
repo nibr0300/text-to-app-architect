@@ -282,6 +282,7 @@ async function handle(body: Record<string, unknown>): Promise<HandlerResult> {
     excluded?: { title?: string; reason?: string }[];
     roadmap?: unknown;
     processAudit?: unknown;
+    contractTests?: unknown;
   };
 
   if (stage === "process") {
