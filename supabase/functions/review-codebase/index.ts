@@ -288,6 +288,39 @@ async function handle(body: Record<string, unknown>): Promise<HandlerResult> {
   }
 
 
+  if (stage === "contract") {
+    const tests = (Array.isArray(contractTests) ? contractTests : [])
+      .filter((t): t is { id: string; text: string } =>
+        !!t && typeof t === "object" && typeof (t as { id?: unknown }).id === "string" && typeof (t as { text?: unknown }).text === "string")
+      .slice(0, 60);
+    if (!tests.length) return { error: "Inga acceptanstester att utvärdera." };
+    if (!files?.length) return { error: "Inga filer att granska." };
+    const tree = files.map((f) => `--- ${f.path} ---\n${f.content}`).join("\n\n");
+    const user = `APP CONTRACT ACCEPTANCE TESTS (each must be judged against the source):\n${JSON.stringify(tests, null, 2)}\n\nPROJECT SOURCE:\n${tree}`;
+    const parsed = await callModel(
+      "google/gemini-3.7-flash",
+      `${BASE}\n\n${BUILD_ENVIRONMENT}\n\n${CONTRACT_PROMPT}`,
+      user,
+    );
+    const knownIds = new Set(tests.map((t) => t.id));
+    const results = (Array.isArray(parsed.results) ? parsed.results : [])
+      .filter((r): r is Record<string, unknown> => !!r && typeof r === "object")
+      .filter((r) => typeof r.id === "string" && knownIds.has(r.id as string))
+      .map((r) => ({
+        id: String(r.id),
+        status: ["pass", "fail", "unknown"].includes(String(r.status)) ? String(r.status) : "unknown",
+        evidence: typeof r.evidence === "string" ? r.evidence.slice(0, 500) : "",
+      }));
+    const byId = new Map(results.map((r) => [r.id, r]));
+    return {
+      contractResults: tests.map((t) => ({
+        id: t.id,
+        text: t.text,
+        ...(byId.get(t.id) ?? { status: "unknown", evidence: "Granskaren returnerade inget utlåtande för detta test." }),
+      })),
+    };
+  }
+
   if (stage === "audit") {
     const cfg = area ? AREA_PROMPTS[area] : undefined;
     if (!cfg) return { error: "Invalid area" };
