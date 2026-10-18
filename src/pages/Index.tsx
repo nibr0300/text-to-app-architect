@@ -3,6 +3,7 @@ import { DescriptionInput } from "@/components/DescriptionInput";
 import { SpecViewer } from "@/components/SpecViewer";
 import { StreamingOutput } from "@/components/StreamingOutput";
 import { CodeGenerator } from "@/components/CodeGenerator";
+import { ContractViewer } from "@/components/ContractViewer";
 import { CodeReview } from "@/components/CodeReview";
 import { ApkBuilder } from "@/components/ApkBuilder";
 
@@ -14,6 +15,27 @@ import { Terminal, Smartphone } from "lucide-react";
 
 const SPEC_STORAGE_KEY = "nlp-programmer:last-spec";
 const CODE_STORAGE_KEY = "nlp-programmer:last-project";
+const CONTRACT_STORAGE_KEY = "nlp-programmer:last-contract";
+
+interface StoredContract {
+  yaml: string;
+  approved: boolean;
+  specKey?: string;
+}
+
+function specKeyOf(spec: AppSpec): string {
+  return JSON.stringify([spec.appName, spec.packageName, spec.description]);
+}
+
+function loadStoredContract(): StoredContract | null {
+  try {
+    const raw = localStorage.getItem(CONTRACT_STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as StoredContract;
+  } catch {
+    return null;
+  }
+}
 
 interface StoredResult {
   spec: AppSpec | null;
@@ -46,7 +68,34 @@ const Index = () => {
   const [spec, setSpec] = useState<AppSpec | null>(() => loadStoredResult()?.spec ?? null);
   const [rawJson, setRawJson] = useState(() => loadStoredResult()?.rawJson ?? "");
   const [files, setFiles] = useState<GeneratedFile[]>(() => loadStoredFiles());
+  const [contractYaml, setContractYaml] = useState(() => loadStoredContract()?.yaml ?? "");
+  const [contractApproved, setContractApproved] = useState(() => loadStoredContract()?.approved ?? false);
+  const [contractSpecKey, setContractSpecKey] = useState(() => loadStoredContract()?.specKey ?? "");
   const { toast } = useToast();
+
+  const handleContractChange = useCallback((approved: boolean, yaml: string) => {
+    setContractApproved(approved);
+    setContractYaml(yaml);
+    setContractSpecKey(approved && spec ? specKeyOf(spec) : "");
+  }, [spec]);
+
+  // Approval only counts for the spec the contract belongs to.
+  // If a different spec is loaded, require re-approval.
+  useEffect(() => {
+    if (spec && contractApproved && contractSpecKey !== specKeyOf(spec)) {
+      setContractApproved(false);
+    }
+  }, [spec, contractApproved, contractSpecKey]);
+
+  // Persist the contract + approval state
+  useEffect(() => {
+    try {
+      if (contractYaml) localStorage.setItem(CONTRACT_STORAGE_KEY, JSON.stringify({ yaml: contractYaml, approved: contractApproved, specKey: contractSpecKey }));
+      else localStorage.removeItem(CONTRACT_STORAGE_KEY);
+    } catch {
+      // Storage full or unavailable — ignore
+    }
+  }, [contractYaml, contractApproved, contractSpecKey]);
 
   // Persist the latest generated spec so it survives leaving/reopening the app
   useEffect(() => {
@@ -75,6 +124,8 @@ const Index = () => {
     setSpec(null);
     setRawJson("");
     setFiles([]);
+    setContractYaml("");
+    setContractApproved(false);
 
 
     let accumulated = "";
@@ -170,8 +221,20 @@ const Index = () => {
 
         {spec && (
           <section>
+            <ContractViewer spec={spec} approved={contractApproved} onApproveChange={handleContractChange} />
+          </section>
+        )}
+
+        {spec && contractApproved && (
+          <section>
             <CodeGenerator spec={spec} files={files} onFilesChange={setFiles} />
           </section>
+        )}
+
+        {spec && !contractApproved && (
+          <p className="text-center text-xs text-muted-foreground">
+            Godkänn kontraktet ovan för att låsa upp kodgenerering.
+          </p>
         )}
 
         {/* Optional add-on: independent deep review — works with or without a spec */}
