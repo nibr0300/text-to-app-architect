@@ -66,6 +66,14 @@ const AREA_PROMPTS: Record<string, { title: string; instructions: string }> = {
   },
 };
 
+const CONTRACT_PROMPT = `You are a contract reviewer. You receive the acceptance tests from the app contract and the full project source. Judge each test against the source code alone:
+- "pass": the code verifiably fulfils the test (cite the file and behaviour).
+- "fail": the code lacks, contradicts or only simulates what the test demands.
+- "unknown": the test cannot be judged statically (e.g. runtime behaviour with no static evidence either way) — say what is missing.
+Be strict and evidence-based; never pass a test on optimism. Write evidence in Swedish. Return ONLY json:
+{"results":[{"id":"the test id copied verbatim","status":"pass|fail|unknown","evidence":"file path and concrete behaviour, or what is missing"}]}
+Every test id in the input must appear exactly once.`;
+
 const AUDIT_SHAPE = `{"summary":"one or two sentences","findings":[{"id":"kebab-case-id","severity":"critical|major|minor|info","title":"short title","detail":"what is wrong and why it matters","paths":["app/src/..."],"suggestion":"concrete fix"}]}`;
 
 const PROCESS_PROMPT = `You are auditing the DEVELOPMENT PROCESS itself, not only the code. You receive the previous completion roadmap, every repair attempt made on each stage (strategy, outcome, rejection reason), the user's directives and the current static analysis.
@@ -106,7 +114,7 @@ interface Finding {
   suggestion?: string;
 }
 
-async function callModel(model: string, system: string, user: string) {
+async function callModel(model: string, system: string, user: string, extra?: Record<string, unknown>) {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
   if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
 
@@ -123,6 +131,7 @@ async function callModel(model: string, system: string, user: string) {
         { role: "user", content: user },
       ],
       response_format: { type: "json_object" },
+      ...extra,
     }),
   });
 
@@ -261,7 +270,7 @@ function sanitizeProcessAudit(parsed: Record<string, unknown>) {
 }
 
 async function handle(body: Record<string, unknown>): Promise<HandlerResult> {
-  const { stage, area, spec, files, sections, lint, directives, reference, excluded, roadmap, processAudit } = (body ?? {}) as {
+  const { stage, area, spec, files, sections, lint, directives, reference, excluded, roadmap, processAudit, contractTests } = (body ?? {}) as {
     stage?: string;
     area?: string;
     spec?: unknown;
@@ -273,6 +282,7 @@ async function handle(body: Record<string, unknown>): Promise<HandlerResult> {
     excluded?: { title?: string; reason?: string }[];
     roadmap?: unknown;
     processAudit?: unknown;
+    contractTests?: unknown;
   };
 
   if (stage === "process") {
@@ -287,6 +297,40 @@ async function handle(body: Record<string, unknown>): Promise<HandlerResult> {
     return { processAudit: sanitizeProcessAudit(parsed) };
   }
 
+
+  if (stage === "contract") {
+    const tests = (Array.isArray(contractTests) ? contractTests : [])
+      .filter((t): t is { id: string; text: string } =>
+        !!t && typeof t === "object" && typeof (t as { id?: unknown }).id === "string" && typeof (t as { text?: unknown }).text === "string")
+      .slice(0, 60);
+    if (!tests.length) return { error: "Inga acceptanstester att utvärdera." };
+    if (!files?.length) return { error: "Inga filer att granska." };
+    const tree = files.map((f) => `--- ${f.path} ---\n${f.content}`).join("\n\n");
+    const user = `APP CONTRACT ACCEPTANCE TESTS (each must be judged against the source):\n${JSON.stringify(tests, null, 2)}\n\nPROJECT SOURCE:\n${tree}`;
+    const parsed = await callModel(
+      "openai/gpt-6-astra",
+      `${BASE}\n\n${BUILD_ENVIRONMENT}\n\n${CONTRACT_PROMPT}`,
+      user,
+      { reasoning_effort: "low" },
+    );
+    const knownIds = new Set(tests.map((t) => t.id));
+    const results = (Array.isArray(parsed.results) ? parsed.results : [])
+      .filter((r): r is Record<string, unknown> => !!r && typeof r === "object")
+      .filter((r) => typeof r.id === "string" && knownIds.has(r.id as string))
+      .map((r) => ({
+        id: String(r.id),
+        status: ["pass", "fail", "unknown"].includes(String(r.status)) ? String(r.status) : "unknown",
+        evidence: typeof r.evidence === "string" ? r.evidence.slice(0, 500) : "",
+      }));
+    const byId = new Map(results.map((r) => [r.id, r]));
+    return {
+      contractResults: tests.map((t) => ({
+        id: t.id,
+        text: t.text,
+        ...(byId.get(t.id) ?? { status: "unknown", evidence: "Granskaren returnerade inget utlåtande för detta test." }),
+      })),
+    };
+  }
 
   if (stage === "audit") {
     const cfg = area ? AREA_PROMPTS[area] : undefined;

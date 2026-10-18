@@ -14,6 +14,7 @@ import {
   RoadmapRepairResult,
 } from "@/types/review";
 import { LintIssue, lintProject } from "@/lib/lintProject";
+import { getAcceptanceTests } from "@/lib/appContract";
 
 
 const REVIEW_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/review-codebase`;
@@ -25,10 +26,13 @@ export const REVIEW_AREAS = [
   { id: "buildability", label: "Byggbarhet & beroenden" },
 ] as const;
 
-export function planReviewStages(withProcessAudit = false) {
+export function planReviewStages(withProcessAudit = false, withContract = false) {
   return [
     { id: "lint", label: "Statisk analys (syntax, plattformsanrop, nycklar)" },
     ...REVIEW_AREAS.map((a) => ({ id: `area:${a.id}`, label: `AI-revision: ${a.label}` })),
+    ...(withContract
+      ? [{ id: "contract", label: "Kontraktsgranskning: acceptanstester mot koden" }]
+      : []),
     ...(withProcessAudit
       ? [{ id: "process", label: "Processgranskning: metodval, roadmap och tidigare försök" }]
       : []),
@@ -37,7 +41,8 @@ export function planReviewStages(withProcessAudit = false) {
 }
 
 interface StageBody {
-  stage: "audit" | "verdict" | "process";
+  stage: "audit" | "verdict" | "process" | "contract";
+  contractTests?: { id: string; text: string; source: string }[];
   area?: string;
   spec?: AppSpec | null;
   files?: GeneratedFile[];
@@ -223,6 +228,20 @@ export async function reviewCodebase(
     }
   }
 
+  let contractResults: import("@/types/review").ContractTestResult[] | undefined;
+  const contractTests = spec ? getAcceptanceTests(spec) : [];
+  if (contractTests.length) {
+    cb.onStageStart("contract");
+    try {
+      const res = await call({ stage: "contract", contractTests, files });
+      contractResults = res.contractResults as typeof contractResults;
+      cb.onStageDone("contract");
+    } catch (e) {
+      // A failed contract review must never block the substantive review.
+      cb.onStageError("contract", e instanceof Error ? e.message : "Okänt fel");
+    }
+  }
+
   const priorRoadmap = previous?.roadmap ?? [];
   let processAudit: ProcessAudit | null = null;
   if (hasRepairExperience(priorRoadmap)) {
@@ -273,6 +292,7 @@ export async function reviewCodebase(
     source,
     fileCount: files.length,
     directives: directives.filter((item) => !fulfilledDirectives.has(item)),
+    contractResults,
   };
   report.delta = compareReports(report, previous);
 
