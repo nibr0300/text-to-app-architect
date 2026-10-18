@@ -66,6 +66,14 @@ const AREA_PROMPTS: Record<string, { title: string; instructions: string }> = {
   },
 };
 
+const CONTRACT_PROMPT = `You are a contract reviewer. You receive the acceptance tests from the app contract and the full project source. Judge each test against the source code alone:
+- "pass": the code verifiably fulfils the test (cite the file and behaviour).
+- "fail": the code lacks, contradicts or only simulates what the test demands.
+- "unknown": the test cannot be judged statically (e.g. runtime behaviour with no static evidence either way) — say what is missing.
+Be strict and evidence-based; never pass a test on optimism. Write evidence in Swedish. Return ONLY json:
+{"results":[{"id":"the test id copied verbatim","status":"pass|fail|unknown","evidence":"file path and concrete behaviour, or what is missing"}]}
+Every test id in the input must appear exactly once.`;
+
 const AUDIT_SHAPE = `{"summary":"one or two sentences","findings":[{"id":"kebab-case-id","severity":"critical|major|minor|info","title":"short title","detail":"what is wrong and why it matters","paths":["app/src/..."],"suggestion":"concrete fix"}]}`;
 
 const PROCESS_PROMPT = `You are auditing the DEVELOPMENT PROCESS itself, not only the code. You receive the previous completion roadmap, every repair attempt made on each stage (strategy, outcome, rejection reason), the user's directives and the current static analysis.
