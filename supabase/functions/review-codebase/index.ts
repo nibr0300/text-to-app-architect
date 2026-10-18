@@ -270,7 +270,7 @@ function sanitizeProcessAudit(parsed: Record<string, unknown>) {
 }
 
 async function handle(body: Record<string, unknown>): Promise<HandlerResult> {
-  const { stage, area, spec, files, sections, lint, directives, reference, excluded, roadmap, processAudit } = (body ?? {}) as {
+  const { stage, area, spec, files, sections, lint, directives, reference, excluded, roadmap, processAudit, contractTests } = (body ?? {}) as {
     stage?: string;
     area?: string;
     spec?: unknown;
